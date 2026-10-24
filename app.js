@@ -551,17 +551,23 @@ VIEWS.home = () => {
   }
   if (!live().length && S.accounts.every(a => !Number(a.opening))) alerts.push(`<button class="alert info" data-act="go" data-v="accounts"><span class="grow"><b>Start here:</b> enter how much is in your cash and bank today</span>›</button>`);
 
-  const bs = billStats(t);
   const recent = [...S.entries].filter(e => !e.draft && e.type !== 'expected').sort(sortDesc).slice(0, 8);
   const shownAlerts = ui.allAlerts ? alerts : alerts.slice(0, 2);
+  const prevSpent = spendMonth(shiftYm(t.slice(0, 7), -1)).total;
   return `${sampleBanner()}
-  <div class="tiles">
-    <button class="tile" data-act="goEntries" data-filter="spent"><div class="lbl">Spent this month</div><div class="val out">${money(s.spent.total)}</div><div class="sub">your own money</div></button>
-    <button class="tile" data-act="jump" data-tab="people"><div class="lbl">Owed to me</div><div class="val in">${money(s.owedToMe)}</div><div class="sub">people &amp; office</div></button>
-    <button class="tile" data-act="jump" data-tab="people"><div class="lbl">I owe</div><div class="val ${s.iOwe ? 'out' : ''}">${money(s.iOwe)}</div><div class="sub">to people</div></button>
-    <button class="tile" data-act="jump" data-tab="bills"><div class="lbl">Bills · 30 days</div><div class="val ${bs.overdue ? 'danger' : bs.count ? 'out' : ''}">${money(bs.total)}</div><div class="sub">${bs.count ? bs.count + ' unpaid' + (bs.overdue ? ', some overdue' : '') : 'nothing due'}</div></button>
+  <div class="card summary">
+    <button class="sum-main" data-act="goEntries" data-filter="spent">
+      <span class="lbl">Spent this month</span>
+      <span class="big out">${money(s.spent.total)}</span>
+      <span class="sub">your own money${prevSpent ? ' · ' + money(prevSpent) + ' last month' : ''}</span>
+    </button>
+    <button class="sum-side" data-act="go" data-v="accounts">
+      <span class="lbl">Cash &amp; bank now</span>
+      <b>${money(s.cash)}</b>
+      <span class="sub">${S.accounts.length} account${S.accounts.length !== 1 ? 's' : ''} ›</span>
+    </button>
   </div>
-  <div class="cashline"><span>Cash &amp; bank now</span><b>${money(s.cash)}</b></div>
+  ${alerts.length ? '<div class="sec-title">Needs attention</div>' : ''}
   ${shownAlerts.join('')}
   ${alerts.length > 2 ? `<button class="link small" style="margin:-2px 2px 8px" data-act="toggleAlerts">${ui.allAlerts ? 'Show less' : 'Show ' + (alerts.length - 2) + ' more'}</button>` : ''}
   <div class="sec-title">Quick add</div>

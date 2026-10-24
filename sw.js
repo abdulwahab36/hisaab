@@ -1,6 +1,6 @@
 // Offline cache for the app shell. Bump VERSION after changing any file.
-const VERSION = 'hisaab-v10';
-const FILES = ['./', './index.html', './style.css?v=10', './config.js?v=10', './app.js?v=10', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
+const VERSION = 'hisaab-v11';
+const FILES = ['./', './index.html', './style.css?v=11', './config.js?v=11', './app.js?v=11', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

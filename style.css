@@ -294,3 +294,12 @@ body.onboarding .nav, body.onboarding #moreBtn { display: none; }
 .bill-sum { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 10px; }
 .bill-sum b { font-size: 18px; }
 .empty.small { padding: 16px; font-size: 13px; }
+
+/* Home summary */
+.summary { display: grid; grid-template-columns: 1.4fr 1fr; padding: 0; overflow: hidden; }
+.summary button { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 14px; min-width: 0; }
+.summary .sum-side { border-left: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+.summary .lbl { font-size: 12px; color: var(--muted); }
+.summary .big { font-size: 26px; font-weight: 750; line-height: 1.2; word-break: break-word; }
+.summary b { font-size: 18px; word-break: break-word; }
+.summary .sub { font-size: 11.5px; color: var(--muted); }
