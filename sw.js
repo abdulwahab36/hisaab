@@ -1,5 +1,5 @@
 // Offline cache for the app shell. Bump VERSION after changing any file.
-const VERSION = 'hisaab-v3';
+const VERSION = 'hisaab-v4';
 const FILES = ['./', './index.html', './style.css', './config.js', './app.js', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

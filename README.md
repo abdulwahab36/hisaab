@@ -30,7 +30,8 @@ Opening index.html directly as a file also works for testing, but offline instal
 - Paid from a person: on Expense/Recoverable, pick a staff member under "Paid from" when they spend from your advance (or pay for you).
 - Advance / Got back: money given to staff, and unused cash returned.
 - Lent / Borrowed / Got back / Paid back: loans with people.
-- Expected: future money in (TA, arrears, payouts) or out (bills). Monthly items repeat automatically.
+- Bills (Home > Bills): electricity, gas, subscriptions etc. Repeat monthly, every 2/3/6 months or yearly. Tap Pay with the real amount; the next one is created automatically.
+- Insights (Home > Insights): own spending by category and book, categories above your usual, biggest expenses, last 6 months.
 
 ## Google Drive auto backup
 One-time setup (about 15 minutes, free): see SETUP-GOOGLE-DRIVE.md.

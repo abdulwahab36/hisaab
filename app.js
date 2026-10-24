@@ -207,7 +207,7 @@ const TYPES = {
   repaid:      { label: 'Paid back',   hint: 'I returned money to a person', f: ['person*', 'account', 'note'] },
   advance:     { label: 'Advance',     hint: 'Given to staff for work; they report spending later', f: ['person*', 'account', 'work', 'note'] },
   transfer:    { label: 'Transfer',    hint: 'Move money between my accounts', f: ['account', 'toAccount', 'note'] },
-  expected:    { label: 'Expected',    hint: 'Money due in future: TA, arrears, payouts, bills', f: ['catAny', 'personOpt', 'repeat', 'note'], dateLabel: 'Due on' }
+  expected:    { label: 'Upcoming',    hint: 'Money due in future: TA, arrears, payouts, bills', f: ['book', 'catAny', 'personOpt', 'repeat', 'note'], dateLabel: 'Due on' }
 };
 const TYPE_ORDER = ['expense', 'recoverable', 'income', 'lent', 'borrowed', 'received', 'repaid', 'advance', 'transfer', 'expected'];
 const SYS_LABEL = { recovery: 'Recovery', adjustment: 'Balance adjustment' };
@@ -386,6 +386,7 @@ let ui = { pendingSeg: 'rec', recFilter: 'open', recPerson: '', sel: new Set(), 
 
 function setTab(t) {
   if (t === 'add' && cur.v !== 'add') resetForm();
+  insMonth = null;
   tab = t; stack = []; cur = { v: t, p: null };
   render();
   window.scrollTo(0, 0);
@@ -410,7 +411,7 @@ window.addEventListener('popstate', () => {
 const TITLES = {
   home: 'Hisaab', people: 'People', add: 'Add entry', pending: 'Pending', more: 'More',
   person: 'Person', accounts: 'Accounts', books: 'Books', cats: 'Categories', works: 'Works / sites', work: 'Work',
-  templates: 'Quick templates', entries: 'All entries', backup: 'Backup & restore', security: 'App lock', help: 'How it works'
+  templates: 'Quick templates', bills: 'Bills', insights: 'Insights', entries: 'All entries', backup: 'Backup & restore', security: 'App lock', help: 'How it works'
 };
 
 function render() {
@@ -438,6 +439,8 @@ VIEWS.home = () => {
   const old = live().filter(e => e.type === 'recoverable' && recInfo(e, am).remaining > 0 && daysBetween(e.date, t) > S.settings.alertDays);
   if (old.length) alerts.push(`<button class="alert" data-act="goPending" data-seg="rec"><span class="grow"><b>${old.length} recoverable${old.length > 1 ? 's' : ''}</b> older than ${S.settings.alertDays} days · ${money(old.reduce((a, e) => a + recInfo(e, am).remaining, 0))}</span>›</button>`);
   const od = live().filter(e => e.type === 'expected' && !expectedInfo(e).closed && e.date < t);
+  const soon = live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date >= t && e.date <= addDays(t, 3));
+  if (soon.length) alerts.push(`<button class="alert info" data-act="go" data-v="bills"><span class="grow"><b>${soon.length} bill${soon.length > 1 ? 's' : ''}</b> due in the next 3 days · ${money(soon.reduce((a, e) => a + expectedInfo(e).rem, 0))}</span>›</button>`);
   if (od.length) alerts.push(`<button class="alert" data-act="goPending" data-seg="exp"><span class="grow"><b>${od.length} expected item${od.length > 1 ? 's' : ''}</b> overdue</span>›</button>`);
   const drafts = S.entries.filter(e => e.draft);
   const pbAll = personBalances();
@@ -474,6 +477,7 @@ VIEWS.home = () => {
   const anyPending = buckets.some(b => b.v > 0);
   const ageBars = anyPending ? buckets.map(b => `<div class="bar-row"><div class="bar-top"><span>${b.label}</span><b>${money(b.v)}</b></div><div class="bar ${b.cls}"><i style="width:${(b.v / maxA) * 100}%"></i></div></div>`).join('') : '<div class="muted small">Nothing pending to recover.</div>';
 
+  const bs = billStats(t), ins = insightTeaser(t);
   const recent = [...S.entries].filter(e => !e.draft && e.type !== 'expected').sort(sortDesc).slice(0, 8);
   const expNet = r2(s.expIn - s.expOut);
 
@@ -485,6 +489,10 @@ VIEWS.home = () => {
     <button class="tile" data-act="goPending" data-seg="exp"><div class="lbl">Expected · 30 days</div><div class="val ${expNet >= 0 ? 'in' : 'out'}">${money(expNet, true)}</div><div class="sub">in ${money(s.expIn)} · out ${money(s.expOut)}</div></button>
   </div>
   <div class="cashline"><span>Cash & bank total</span><b>${money(s.cash)}</b></div>
+  <div class="tiles">
+    <button class="tile" data-act="go" data-v="bills"><div class="lbl">Bills</div><div class="val ${bs.overdue ? 'danger' : ''}" style="font-size:16px">${bs.count ? bs.count + ' due · 30 days' : 'None due'}</div><div class="sub">${bs.count ? money(bs.total) : 'add electricity, Netflix…'}</div></button>
+    <button class="tile" data-act="go" data-v="insights"><div class="lbl">Insights</div><div class="val" style="font-size:16px">${ins.text}</div><div class="sub">${ins.sub}</div></button>
+  </div>
   ${alerts.join('')}
   <div class="sec-title">Quick add</div>
   <div class="chips">
@@ -668,7 +676,7 @@ VIEWS.add = () => {
   if (has('toAccount')) parts.push(`<div class="field"><label>To account</label><select data-f="toAccountId">${opt(accOpts, f.toAccountId, 'Select account')}</select></div>`);
 
   const dateLbl = T.dateLabel || 'Date';
-  const showBook = has('book'), showCat = has('cat') || has('catIn') || has('catAny');
+  const showBook = has('book') && !(f.type === 'expected' && f.direction !== 'out'), showCat = has('cat') || has('catIn') || has('catAny');
   const catKind = has('cat') ? 'out' : has('catIn') ? 'in' : (f.direction === 'out' ? 'out' : 'in');
   const cats = S.categories.filter(c => c.kind === catKind);
   parts.push(`<div class="two">
@@ -681,7 +689,7 @@ VIEWS.add = () => {
   if (has('recoverFrom')) parts.push(`<div class="field"><label>Recover from (optional)</label><div class="row"><select class="inp grow" data-f="recoverFrom">${opt(S.people, f.recoverFrom, 'Not decided yet')}</select><button type="button" class="btn sm" data-act="editPerson" data-fromform="recoverFrom">+ New</button></div></div>`);
   if (has('personOpt')) parts.push(`<div class="field"><label>From / to (optional)</label><select data-f="personId">${opt(S.people, f.personId, 'None')}</select></div>`);
   if (has('work') && (f.type !== 'lent' || f.workId || person(f.personId)?.kind === 'staff')) parts.push(`<div class="field"><label>Work / site (optional)</label><div class="row"><select class="inp grow" data-f="workId">${opt(S.works.filter(w => !w.closed || w.id === f.workId), f.workId, 'None')}</select><button type="button" class="btn sm" data-act="editWork" data-fromform="1">+ New</button></div></div>`);
-  if (has('repeat')) parts.push(`<div class="field"><label>Repeat</label><select data-f="repeat"><option value="">Once</option><option value="monthly" ${f.repeat === 'monthly' ? 'selected' : ''}>Every month</option></select></div>`);
+  if (has('repeat')) parts.push(`<div class="field"><label>Repeats</label><select data-f="repeat"><option value="">Once</option>${Object.entries(REPEAT_LBL).map(([k, l]) => `<option value="${k}" ${f.repeat === k ? 'selected' : ''}>${l[0].toUpperCase() + l.slice(1)}</option>`).join('')}</select></div>`);
   parts.push(`<div class="field"><label>Note</label><input data-f="note" value="${esc(f.note)}" placeholder="What was it for?" maxlength="200"></div>`);
   if (has('receipt')) {
     const src = f.receiptData || (f.receipt ? imgCache[f.receipt] : '');
@@ -752,7 +760,7 @@ function formToEntry() {
   if (has('personOpt')) e.personId = f.personId || '';
   if (has('due')) e.dueDate = f.dueDate || '';
   if (e.type === 'expected') e.direction = f.direction === 'out' ? 'out' : 'in';
-  if (has('repeat')) e.repeat = f.repeat === 'monthly' ? 'monthly' : '';
+  if (has('repeat')) e.repeat = REPEAT_M[f.repeat] ? f.repeat : '';
   if (f.linkExpected) e.linkExpected = f.linkExpected;
   if (e.type === 'lent' || e.type === 'received') {
     const old = f.editingId ? S.entries.find(x => x.id === f.editingId) : null;
@@ -886,15 +894,18 @@ function afterExpectedPayment(xid) {
   const x = S.entries.find(e => e.id === xid);
   if (!x) return;
   const xi = expectedInfo(x);
-  if (xi.rem <= 0 && !x.closed) closeExpected(x);
+  // A repeating bill is settled by any payment (electricity/gas amounts vary month to month)
+  if (!x.closed && (xi.rem <= 0 || (x.direction === 'out' && REPEAT_M[x.repeat]))) closeExpected(x);
 }
+const REPEAT_M = { monthly: 1, '2m': 2, '3m': 3, '6m': 6, yearly: 12 };
+const REPEAT_LBL = { monthly: 'monthly', '2m': 'every 2 months', '3m': 'every 3 months', '6m': 'every 6 months', yearly: 'yearly' };
 function closeExpected(x) {
   x.closed = true;
-  if (x.repeat === 'monthly' && !x.spawned) {
+  if (REPEAT_M[x.repeat] && !x.spawned) {
     x.spawned = true;
     S.entries.push({
-      id: uid(), type: 'expected', amount: x.amount, date: addMonths(x.date, 1), note: x.note || '', categoryId: x.categoryId || '',
-      personId: x.personId || '', direction: x.direction, repeat: 'monthly', closed: false, spawned: false,
+      id: uid(), type: 'expected', amount: x.amount, date: addMonths(x.date, REPEAT_M[x.repeat]), note: x.note || '', categoryId: x.categoryId || '',
+      bookId: x.bookId || '', personId: x.personId || '', direction: x.direction, repeat: x.repeat, closed: false, spawned: false,
       createdAt: new Date().toISOString(), history: []
     });
   }
@@ -956,7 +967,7 @@ function pendingExp() {
     return `<div class="list-item">
       <button class="li-main" style="text-align:left" data-act="openEntry" data-id="${e.id}">
         <div class="li-title">${esc(entryTitle(e))}</div>
-        <div class="li-sub ${od ? 'danger' : ''}">${fmtDate(e.date)}${od ? ' · overdue' : ''}${e.repeat ? ' · monthly' : ''}${person(e.personId) ? ' · ' + esc(person(e.personId).name) : ''}</div>
+        <div class="li-sub ${od ? 'danger' : ''}">${fmtDate(e.date)}${od ? ' · overdue' : ''}${REPEAT_LBL[e.repeat] ? ' · ' + REPEAT_LBL[e.repeat] : ''}${person(e.personId) ? ' · ' + esc(person(e.personId).name) : ''}</div>
       </button>
       <div class="li-amt ${e.direction === 'out' ? 'out' : 'in'}">${e.direction === 'out' ? '-' : '+'}${money(xi.closed ? e.amount : xi.rem)}
       ${!xi.closed ? `<div><button class="btn sm" data-act="payExpected" data-id="${e.id}">${e.direction === 'out' ? 'Pay' : 'Receive'}</button></div>` : '<div class="li-sub">done</div>'}</div>
@@ -1064,12 +1075,13 @@ VIEWS.entries = () => {
     if (F.book) list = list.filter(e => e.bookId === F.book);
     if (F.person) list = list.filter(e => e.personId === F.person || e.viaPersonId === F.person);
     if (F.work) list = list.filter(e => e.workId === F.work);
+    if (F.cat) list = list.filter(e => catOf(e) === F.cat);
   }
   if (F.q) { const q = F.q.toLowerCase(); list = list.filter(e => (entryTitle(e) + ' ' + entrySub(e) + ' ' + e.amount).toLowerCase().includes(q)); }
   list.sort(sortDesc);
   const types = [...TYPE_ORDER, 'recovery', 'adjustment'];
   return `<input class="inp" placeholder="Search note, person, amount…" value="${esc(F.q)}" data-ef="q" style="margin-bottom:10px">
-  ${F.drafts ? `<div class="alert info"><span class="grow">Showing incomplete receipts</span><button class="link" data-act="clearEF">Show all</button></div>` : F.spentOnly ? `<div class="alert info"><span class="grow">Showing own spending only</span><button class="link" data-act="clearEF">Show all</button></div>` : ''}
+  ${F.drafts ? `<div class="alert info"><span class="grow">Showing incomplete receipts</span><button class="link" data-act="clearEF">Show all</button></div>` : F.spentOnly ? `<div class="alert info"><span class="grow">Own spending${F.cat ? ': ' + esc(catName(F.cat)) : ''}</span><button class="link" data-act="clearEF">Show all</button></div>` : ''}
   ${F.drafts ? '' : `<div class="two">
     <div class="field"><input type="month" value="${esc(F.month)}" data-ef="month"></div>
     <div class="field"><select data-ef="type"><option value="">All types</option>${types.map(t => `<option value="${t}" ${F.type === t ? 'selected' : ''}>${typeLabel(t)}</option>`).join('')}</select></div>
@@ -1078,6 +1090,93 @@ VIEWS.entries = () => {
   </div>`}
   <div class="muted small" style="margin:0 2px 6px">${list.length} entr${list.length === 1 ? 'y' : 'ies'}${F.month && !F.drafts ? ' · ' + monthLabel(F.month) : ''}</div>
   <div class="card flush">${list.length ? list.map(e => entryItem(e)).join('') : '<div class="empty">No entries match.</div>'}</div>`;
+};
+
+// ---------------- Bills ----------------
+function billStats(t) {
+  const lim = addDays(t, 30);
+  const open = live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed);
+  const due = open.filter(e => e.date <= lim);
+  return { count: due.length, total: r2(due.reduce((a, e) => a + expectedInfo(e).rem, 0)), overdue: open.some(e => e.date < t) };
+}
+VIEWS.bills = () => {
+  const t = today();
+  const items = live().filter(e => e.type === 'expected' && e.direction === 'out').map(e => ({ e, xi: expectedInfo(e) })).filter(x => !x.xi.closed)
+    .sort((a, b) => (a.e.date < b.e.date ? -1 : 1));
+  const monthly = r2(items.filter(x => REPEAT_M[x.e.repeat]).reduce((a, x) => a + x.e.amount / REPEAT_M[x.e.repeat], 0));
+  const groups = [['Overdue', x => x.e.date < t], ['Next 7 days', x => x.e.date >= t && x.e.date <= addDays(t, 7)], ['Later', x => x.e.date > addDays(t, 7)]];
+  const row = ({ e, xi }) => `<div class="list-item">
+    <button class="li-main" style="text-align:left" data-act="openEntry" data-id="${e.id}">
+      <div class="li-title">${esc(entryTitle(e))}</div>
+      <div class="li-sub ${e.date < t ? 'danger' : ''}">${fmtDate(e.date)}${REPEAT_LBL[e.repeat] ? ' · ' + REPEAT_LBL[e.repeat] : ' · once'}${book(e.bookId) ? ' · ' + esc(book(e.bookId).name) : ''}</div>
+    </button>
+    <div class="li-amt">${money(xi.rem)}<div><button class="btn sm" data-act="payExpected" data-id="${e.id}">Pay</button></div></div>
+  </div>`;
+  const body = groups.map(([name, fn]) => { const g = items.filter(fn); return g.length ? `<div class="sec-title">${name}</div><div class="card flush">${g.map(row).join('')}</div>` : ''; }).join('');
+  return `<div class="tiles">
+    <div class="tile"><div class="lbl">Due in 30 days</div><div class="val out">${money(billStats(t).total)}</div></div>
+    <div class="tile"><div class="lbl">Repeating bills</div><div class="val">${money(monthly)}</div><div class="sub">per month on average</div></div>
+  </div>
+  <button class="btn primary block" data-act="addBill">+ Add bill</button>
+  ${body || '<div class="empty">No bills yet. Add electricity, gas, water, internet, rent, or subscriptions like Netflix, ChatGPT or Claude. Set how often they repeat; tap Pay when you pay, and the next one is created automatically.</div>'}
+  <p class="muted small mt">Amount changes every month (electricity, gas)? Enter a usual amount; when you tap Pay you can type the real amount. Subscriptions charged in dollars: enter the rupee amount from your card SMS.</p>`;
+};
+
+// ---------------- Insights ----------------
+function shiftYm(ym, n) { return addMonths(ym + '-01', n).slice(0, 7); }
+function catOf(e) { return e.type === 'adjustment' ? '_unrec' : (e.categoryId || '_none'); }
+function catName(id) { return id === '_unrec' ? 'Unrecorded (balance check)' : id === '_none' ? 'No category' : (cat(id)?.name || 'Deleted'); }
+function bookName(id) { return id === '_unrec' ? 'Unrecorded (balance check)' : id === '_none' ? 'No book' : (book(id)?.name || 'Deleted'); }
+function spendMonth(ym) { return ownSpending(...monthBounds(ym)); }
+function insightTeaser(t) {
+  const ym = t.slice(0, 7), cur = spendMonth(ym), prev = spendMonth(shiftYm(ym, -1));
+  const top = Object.entries(cur.byCat).sort((a, b) => b[1] - a[1])[0];
+  if (!cur.total) return { text: 'No spending yet', sub: 'this month' };
+  const ch = prev.total ? Math.round((cur.total - prev.total) / prev.total * 100) : null;
+  return { text: top ? esc(catName(top[0])) : 'This month', sub: (top ? 'top category · ' : '') + (ch === null ? 'see breakdown' : (ch >= 0 ? '+' : '') + ch + '% vs last month so far') };
+}
+let insMonth = null;
+VIEWS.insights = () => {
+  const ym = insMonth || today().slice(0, 7);
+  const cur = spendMonth(ym), prev = spendMonth(shiftYm(ym, -1));
+  const past = [1, 2, 3].map(i => spendMonth(shiftYm(ym, -i)));
+  const avg = id => r2(past.reduce((a, m) => a + (m.byCat[id] || 0), 0) / 3);
+  const ch = prev.total ? Math.round((cur.total - prev.total) / prev.total * 100) : null;
+  const cats = Object.entries(cur.byCat).sort((a, b) => b[1] - a[1]);
+  const maxC = Math.max(1, ...cats.map(c => c[1]));
+  const catRows = cats.map(([id, v]) => {
+    const a = avg(id);
+    const tag = a === 0 ? (past.some(m => m.total) ? '<span class="badge partial">new</span>' : '') : v > a * 1.3 && v - a >= 500 ? `<span class="badge overdue">${Math.round((v - a) / a * 100)}% above usual</span>` : '';
+    return `<button class="bar-row" style="display:block;width:100%;text-align:left" data-act="insCat" data-c="${esc(id)}">
+      <div class="bar-top"><span>${esc(catName(id))} ${tag}</span><b>${money(v)}</b></div>
+      <div class="bar ${tag.includes('above') ? 'w' : ''}"><i style="width:${v / maxC * 100}%"></i></div>
+      ${a ? `<div class="muted small">usual ${money(a)} / month</div>` : ''}</button>`;
+  }).join('');
+  const books = Object.entries(cur.byBook).sort((a, b) => b[1] - a[1]);
+  const maxB = Math.max(1, ...books.map(c => c[1]));
+  const [f, to] = monthBounds(ym);
+  const big = live().filter(e => e.type === 'expense' && e.date >= f && e.date <= to).sort((a, b) => b.amount - a.amount).slice(0, 5);
+  const months = [5, 4, 3, 2, 1, 0].map(i => { const m = shiftYm(ym, -i); return { m, v: spendMonth(m).total }; });
+  const maxM = Math.max(1, ...months.map(x => x.v));
+  const isNow = ym === today().slice(0, 7);
+  return `<div class="row" style="margin-bottom:12px">
+    <button class="btn sm" data-act="insMove" data-n="-1">‹</button>
+    <div class="grow" style="text-align:center;font-weight:650">${monthLabel(ym)}</div>
+    <button class="btn sm" data-act="insMove" data-n="1" ${isNow ? 'disabled' : ''}>›</button>
+  </div>
+  <div class="tiles">
+    <div class="tile"><div class="lbl">Own spending</div><div class="val out">${money(cur.total)}</div><div class="sub">${isNow ? 'so far this month' : 'whole month'}</div></div>
+    <div class="tile"><div class="lbl">vs ${monthLabel(shiftYm(ym, -1)).split(' ')[0]}</div><div class="val ${ch > 0 ? 'out' : 'in'}">${ch === null ? '—' : (ch >= 0 ? '+' : '') + ch + '%'}</div><div class="sub">${money(prev.total)} last month</div></div>
+  </div>
+  <div class="sec-title">By category <span class="muted" style="text-transform:none;font-weight:400">tap to see entries</span></div>
+  <div class="card">${catRows || '<div class="muted small">No own spending in this month.</div>'}</div>
+  <div class="sec-title">By book</div>
+  <div class="card">${books.length ? books.map(([id, v]) => `<div class="bar-row"><div class="bar-top"><span>${esc(bookName(id))}</span><b>${money(v)}</b></div><div class="bar"><i style="width:${v / maxB * 100}%"></i></div></div>`).join('') : '<div class="muted small">Nothing yet.</div>'}</div>
+  <div class="sec-title">Biggest expenses</div>
+  <div class="card flush">${big.length ? big.map(e => entryItem(e)).join('') : '<div class="empty">None.</div>'}</div>
+  <div class="sec-title">Last 6 months</div>
+  <div class="card">${months.map(x => `<div class="bar-row"><div class="bar-top"><span>${monthLabel(x.m)}</span><b>${money(x.v)}</b></div><div class="bar"><i style="width:${x.v / maxM * 100}%"></i></div></div>`).join('')}</div>
+  <p class="muted small mt">Only your own money: expenses, written-off recoverables and unrecorded gaps from balance checks. Office money you will get back, loans and transfers are not counted.</p>`;
 };
 
 VIEWS.backup = () => {
@@ -1181,7 +1280,7 @@ async function openEntry(id) {
   if (e.categoryId) dl('Category', esc(cat(e.categoryId)?.name || '—'));
   if (e.workId) dl('Work', esc(work(e.workId)?.name || '—'));
   if (e.dueDate) dl('Return by', fmtDate(e.dueDate));
-  if (e.repeat) dl('Repeat', 'Monthly');
+  if (REPEAT_LBL[e.repeat]) dl('Repeats', REPEAT_LBL[e.repeat]);
   if (e.note) dl('Note', esc(e.note));
   const actions = [];
   let extra = '';
@@ -1751,6 +1850,13 @@ const ACT = {
   setField: el => { form[el.dataset.k] = el.dataset.val; if (el.dataset.k === 'direction') form.categoryId = ''; render(); },
   saveForm: () => saveForm(),
   saveNext: () => saveForm(true),
+  addBill: () => openFormWith({ type: 'expected', direction: 'out', repeat: 'monthly' }),
+  insMove: el => { if (el.disabled) return; insMonth = shiftYm(insMonth || today().slice(0, 7), Number(el.dataset.n)); if (insMonth > today().slice(0, 7)) insMonth = today().slice(0, 7); render(); },
+  insCat: el => {
+    const ym = insMonth || today().slice(0, 7);
+    ui.entryFilter = { month: ym, type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: true, cat: el.dataset.c };
+    go('entries');
+  },
   amtOp: el => {
     const inp = $('#amt'); if (!inp) return;
     const v = inp.value.trim();
@@ -1802,7 +1908,7 @@ const ACT = {
     const x = S.entries.find(e => e.id === el.dataset.id); if (!x) return;
     const xi = expectedInfo(x);
     closeSheet();
-    openFormWith({ type: x.direction === 'out' ? 'expense' : 'income', amount: String(xi.rem), categoryId: x.categoryId || '', note: x.note || '', linkExpected: x.id });
+    openFormWith({ type: x.direction === 'out' ? 'expense' : 'income', amount: String(xi.rem), categoryId: x.categoryId || '', bookId: x.bookId || S.settings.last.bookId || '', note: x.note || '', linkExpected: x.id });
   },
   closeExp: async el => { const x = S.entries.find(e => e.id === el.dataset.id); if (!x) return; closeExpected(x); await save(); closeSheet(); toast('Marked done'); render(); },
   reopenExp: async el => { const x = S.entries.find(e => e.id === el.dataset.id); if (!x) return; x.closed = false; await save(); closeSheet(); render(); },
