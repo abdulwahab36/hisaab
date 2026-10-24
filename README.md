@@ -37,6 +37,9 @@ One-time setup (about 15 minutes, free): see SETUP-GOOGLE-DRIVE.md.
 After that the app saves to your Drive folder "Hisaab Backups" after every change. Your Google sign-in lasts 1 hour; after that the app briefly jumps to Google and back (about a second) to refresh it. The last 15 days are kept. Receipt photos are saved in Hisaab Backups/receipts.
 New phone: install the app, More > Backup > Restore from Google Drive.
 
+## APK
+See GET-APK.md (free, via PWABuilder). Not required: installing from Chrome gives the same app.
+
 ## Updating the app later
 Replace the files on your host and change VERSION in sw.js (e.g. hisaab-v2) so phones pick up the new version. Your data is not affected.
 

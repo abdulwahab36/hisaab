@@ -201,13 +201,13 @@ const TYPES = {
   expense:     { label: 'Expense',     hint: 'My own spending', f: ['paidFrom', 'book', 'cat', 'work', 'note', 'receipt'] },
   recoverable: { label: 'Recoverable', hint: 'Spent now, to get back later (office, company, someone)', f: ['paidFrom', 'book', 'cat', 'work', 'recoverFrom', 'note', 'receipt'] },
   income:      { label: 'Income',      hint: 'Salary, TA, online income…', f: ['account', 'catIn', 'note', 'receipt'] },
-  lent:        { label: 'Lent',        hint: 'I gave money, they will return it', f: ['person*', 'account', 'due', 'note'] },
+  lent:        { label: 'Lent',        hint: 'I gave money, they will return it', f: ['person*', 'account', 'work', 'due', 'note'] },
   borrowed:    { label: 'Borrowed',    hint: 'I took money, I will return it', f: ['person*', 'account', 'due', 'note'] },
-  received:    { label: 'Got back',    hint: 'A person returned money (loan or unused advance)', f: ['person*', 'account', 'note'] },
+  received:    { label: 'Got back',    hint: 'A person returned money (loan or unused advance)', f: ['person*', 'account', 'due', 'note'] },
   repaid:      { label: 'Paid back',   hint: 'I returned money to a person', f: ['person*', 'account', 'note'] },
   advance:     { label: 'Advance',     hint: 'Given to staff for work; they report spending later', f: ['person*', 'account', 'work', 'note'] },
   transfer:    { label: 'Transfer',    hint: 'Move money between my accounts', f: ['account', 'toAccount', 'note'] },
-  expected:    { label: 'Expected',    hint: 'Money due in future: TA, arrears, payouts, bills', f: ['direction', 'catAny', 'personOpt', 'repeat', 'note'], dateLabel: 'Expected on' }
+  expected:    { label: 'Expected',    hint: 'Money due in future: TA, arrears, payouts, bills', f: ['catAny', 'personOpt', 'repeat', 'note'], dateLabel: 'Due on' }
 };
 const TYPE_ORDER = ['expense', 'recoverable', 'income', 'lent', 'borrowed', 'received', 'repaid', 'advance', 'transfer', 'expected'];
 const SYS_LABEL = { recovery: 'Recovery', adjustment: 'Balance adjustment' };
@@ -277,11 +277,11 @@ function personLines(pid) {
   for (const e of live()) {
     const a = e.amount;
     switch (e.type) {
-      case 'lent': if (e.personId === pid) push(e.date, e, 'Lent', a); break;
+      case 'lent': if (e.personId === pid) push(e.date, e, 'You gave', a); break;
       case 'advance': if (e.personId === pid) push(e.date, e, 'Advance given', a); break;
-      case 'repaid': if (e.personId === pid) push(e.date, e, 'Paid to them', a); break;
-      case 'borrowed': if (e.personId === pid) push(e.date, e, 'Borrowed', -a); break;
-      case 'received': if (e.personId === pid) push(e.date, e, 'Received from them', -a); break;
+      case 'repaid': if (e.personId === pid) push(e.date, e, 'You paid them', a); break;
+      case 'borrowed': if (e.personId === pid) push(e.date, e, 'They gave you', -a); break;
+      case 'received': if (e.personId === pid) push(e.date, e, 'They paid you', -a); break;
       case 'expense': if (e.viaPersonId === pid) push(e.date, e, 'Spent for me', -a); break;
       case 'recoverable':
         if (e.viaPersonId === pid) push(e.date, e, 'Spent for me', -a);
@@ -361,6 +361,7 @@ function entrySub(e) {
   const vp = person(e.viaPersonId); if (vp) parts.push('paid by ' + vp.name);
   const w = work(e.workId); if (w) parts.push(w.name);
   if (e.accountId && !e.viaPersonId && e.type !== 'transfer') { const a = acc(e.accountId); if (a) parts.push(a.name); }
+  if (e.oldEntry) parts.push('before app');
   return parts.join(' · ');
 }
 function entryItem(e, opts = {}) {
@@ -439,6 +440,10 @@ VIEWS.home = () => {
   const od = live().filter(e => e.type === 'expected' && !expectedInfo(e).closed && e.date < t);
   if (od.length) alerts.push(`<button class="alert" data-act="goPending" data-seg="exp"><span class="grow"><b>${od.length} expected item${od.length > 1 ? 's' : ''}</b> overdue</span>›</button>`);
   const drafts = S.entries.filter(e => e.draft);
+  const pbAll = personBalances();
+  const dueP = S.people.filter(p => p.dueDate && pbAll[p.id] && p.dueDate <= t).sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
+  if (dueP.length === 1) { const p = dueP[0], b = pbAll[p.id]; alerts.push(`<button class="alert" data-act="go" data-v="person" data-p="${p.id}"><span class="grow"><b>${esc(p.name)}</b> · ${b > 0 ? money(b) + ' was promised to you' : 'you promised to pay ' + money(-b)} by ${fmtShort(p.dueDate)}</span>›</button>`); }
+  else if (dueP.length > 1) alerts.push(`<button class="alert" data-act="tab" data-tab="people"><span class="grow"><b>${dueP.length} people</b> past a promised payment date</span>›</button>`);
   if (drafts.length) alerts.push(`<button class="alert info" data-act="goEntries" data-filter="draft"><span class="grow"><b>${drafts.length} incomplete</b> receipt${drafts.length > 1 ? 's' : ''} to fill in</span>›</button>`);
   const dv = S.settings.drive;
   if (dv.connected && dv.needsReconnect) {
@@ -495,6 +500,14 @@ VIEWS.home = () => {
   <div class="card flush">${recent.length ? recent.map(e => entryItem(e)).join('') : '<div class="empty">No entries yet. Tap + to add one.</div>'}</div>`;
 };
 
+function dueTag(p, bal) {
+  if (!p.dueDate || !bal) return '';
+  const d = daysBetween(today(), p.dueDate);
+  const who = bal > 0 ? 'Promised by' : 'I promised by';
+  if (d < 0) return `<span class="danger">${who} ${fmtShort(p.dueDate)} · ${-d}d late</span>`;
+  if (d === 0) return `<span class="warn">${who} today</span>`;
+  return `<span class="muted">${who} ${fmtShort(p.dueDate)}</span>`;
+}
 function sortDesc(a, b) {
   if (a.date !== b.date) return a.date < b.date ? 1 : -1;
   return (a.createdAt || '') < (b.createdAt || '') ? 1 : -1;
@@ -520,7 +533,7 @@ VIEWS.people = () => {
     const v = pb[p.id] || 0;
     const st = v > 0 ? `<span class="in">owes you</span>` : v < 0 ? `<span class="out">you owe</span>` : '<span class="muted">settled</span>';
     return `<button class="list-item" data-act="go" data-v="person" data-p="${p.id}">
-      <div class="li-main"><div class="li-title">${esc(p.name)}</div><div class="li-sub">${esc(PERSON_KINDS[p.kind] || '')}${p.phone ? ' · ' + esc(p.phone) : ''}</div></div>
+      <div class="li-main"><div class="li-title">${esc(p.name)}</div><div class="li-sub">${dueTag(p, v) || esc(PERSON_KINDS[p.kind] || '') + (p.phone ? ' · ' + esc(p.phone) : '')}</div></div>
       <div class="li-amt">${money(Math.abs(v))}<div class="li-sub">${st}</div></div></button>`;
   }).join('') : `<div class="empty">${q ? 'No match.' : 'No people yet. Add friends, staff, or your office/company as a person.'}</div>`}</div>`;
 };
@@ -538,14 +551,12 @@ VIEWS.person = (pid) => {
     <div class="muted small">${esc(PERSON_KINDS[p.kind] || '')}${p.phone ? ' · ' + esc(p.phone) : ''}</div>
     <div class="bal ${bal > 0 ? 'in' : bal < 0 ? 'out' : ''}">${money(Math.abs(bal))}</div>
     <div class="muted">${balTxt}</div>
+    ${dueTag(p, bal) ? `<div class="small mt">${dueTag(p, bal)} <button class="link small" data-act="editPerson" data-id="${pid}">change</button></div>` : ''}
   </div>
   <div class="qa">
-    <button data-act="quickType" data-type="lent" data-p="${pid}">Lent</button>
-    <button data-act="quickType" data-type="received" data-p="${pid}">Got back</button>
-    <button data-act="quickType" data-type="advance" data-p="${pid}">Advance</button>
-    <button data-act="quickType" data-type="borrowed" data-p="${pid}">Borrowed</button>
-    <button data-act="quickType" data-type="repaid" data-p="${pid}">Paid back</button>
-    <button data-act="quickType" data-type="spentBy" data-p="${pid}">They spent</button>
+    <button data-act="quickType" data-type="lent" data-p="${pid}">I gave</button>
+    <button data-act="quickType" data-type="received" data-p="${pid}">I received</button>
+    <button data-act="quickType" data-type="spentBy" data-p="${pid}">They spent for me</button>
   </div>
   <div class="btn-row">
     <button class="btn sm" data-act="shareWA" data-p="${pid}">WhatsApp statement</button>
@@ -564,16 +575,54 @@ VIEWS.person = (pid) => {
 
 // ---------------- Add / edit form ----------------
 let form = {};
+// ---- Simple choices on screen, detailed types inside ----
+// Money out: For me (expense) | Gets paid back (recoverable) | Give to a person (lent/advance/paid back)
+// Money in:  Income | From a person (got back / borrowed)
+// "Not yet" tick turns For me / Income into an upcoming (expected) item.
+const UI_OF = { expense: ['out', 'me'], recoverable: ['out', 'back'], lent: ['out', 'person'], advance: ['out', 'person'], repaid: ['out', 'person'], income: ['in', 'income'], received: ['in', 'person'], borrowed: ['in', 'person'], transfer: ['move', ''] };
+function uiFromType(t, direction) {
+  if (t === 'expected') return { dir: direction === 'out' ? 'out' : 'in', kind: direction === 'out' ? 'me' : 'income', later: true };
+  const [dir, kind] = UI_OF[t] || ['out', 'me'];
+  return { dir, kind, later: false };
+}
+function deriveType() {
+  const f = form;
+  if (f.dir === 'move') f.type = 'transfer';
+  else if (f.dir === 'out') f.type = f.kind === 'back' ? 'recoverable' : f.kind === 'person' ? 'lent' : (f.later ? 'expected' : 'expense');
+  else f.type = f.kind === 'person' ? 'received' : (f.later ? 'expected' : 'income');
+  if (f.type === 'expected') f.direction = f.dir === 'out' ? 'out' : 'in';
+  if (!['me', 'income'].includes(f.kind)) f.later = false;
+  const wantKind = (f.type === 'expense' || f.type === 'recoverable' || (f.type === 'expected' && f.direction === 'out')) ? 'out' : 'in';
+  if (cat(f.categoryId) && cat(f.categoryId).kind !== wantKind) f.categoryId = '';
+}
+function formLocked() {
+  if (!form.editingId) return false;
+  const e = S.entries.find(x => x.id === form.editingId);
+  return !!(e && e.type === 'recoverable' && !e.draft && recInfo(e).recovered > 0);
+}
+const UI_HINT = {
+  'out:me': 'Your own spending. Counts in "Spent this month".',
+  'out:me:later': 'Not paid yet. Shows under Pending → Upcoming until you tap Pay.',
+  'out:back': 'You paid, but office, company or someone will repay you. Not your spending; stays in Pending until recovered.',
+  'out:person': 'Cash handed to someone: a loan, a staff advance, or paying back what you owe. The app works out which from their balance.',
+  'in:income': 'Salary, TA, online income…',
+  'in:income:later': 'Not received yet (TA claim, arrears, payout). Shows under Pending → Upcoming until you tap Receive.',
+  'in:person': 'Money from someone: they return what they owe you, or they lend you money.',
+  'move:': 'Move money between your own accounts.'
+};
 function resetForm(over = {}) {
   const L = S.settings.last || {};
+  const u = uiFromType(over.type || 'expense', over.direction);
   form = {
     type: 'expense', amount: '', date: today(), paidFrom: L.paidFrom || (S.accounts[0] ? 'a:' + S.accounts[0].id : ''),
     accountId: L.accountId || (S.accounts[0]?.id || ''), toAccountId: '', bookId: L.bookId || '', categoryId: '', workId: '',
     personId: '', recoverFrom: '', dueDate: '', direction: 'in', repeat: '', note: '',
     receipt: '', receiptData: '', saveTpl: false, tplName: '',
-    editingId: null, draftId: null, linkExpected: null, returnTo: null, fromQuick: false, ...over
+    editingId: null, draftId: null, linkExpected: null, returnTo: null, fromQuick: false, ...u, ...over
   };
+  deriveType();
 }
+function setFormTypeForTest(t, direction) { const keep = form.amount; Object.assign(form, uiFromType(t, direction)); form.amount = keep; deriveType(); render(); }
 
 function opt(list, val, empty) {
   return (empty !== undefined ? `<option value="">${esc(empty)}</option>` : '') + list.map(x => `<option value="${x.id}" ${x.id === val ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
@@ -588,26 +637,34 @@ VIEWS.add = () => {
   if (!f.editingId) {
     parts.push(S.templates.length ? `<div class="chips" style="margin-bottom:12px">${S.templates.map(tp => `<button class="chip" data-act="useTpl" data-id="${tp.id}">${esc(tp.name)}</button>`).join('')}</div>` : '');
   }
-  parts.push(`<div class="type-grid">${TYPE_ORDER.map(t => `<button class="chip ${f.type === t ? 'on' : ''}" data-act="setType" data-type="${t}" ${f.editingId && (f.type === 'recoverable' && recInfo(S.entries.find(e => e.id === f.editingId) || { amount: 0 }).recovered > 0) && t !== 'recoverable' ? 'disabled' : ''}>${TYPES[t].label}</button>`).join('')}</div>`);
-  parts.push(`<div class="type-hint">${esc(T.hint || '')}</div>`);
+  const lock = formLocked();
+  const segBtn = (v, label) => `<button type="button" class="${f.dir === v ? 'on' : ''}" data-act="setDir" data-v="${v}" ${lock ? 'disabled' : ''}>${label}</button>`;
+  parts.push(`<div class="seg">${segBtn('out', 'Money out')}${segBtn('in', 'Money in')}${segBtn('move', 'Transfer')}</div>`);
+  const kinds = f.dir === 'out' ? [['me', 'For me'], ['back', 'Gets paid back'], ['person', 'Give to a person']]
+    : f.dir === 'in' ? [['income', 'Income'], ['person', 'From a person']] : [];
+  if (kinds.length) parts.push(`<div class="chips" style="margin-bottom:8px">${kinds.map(([k, l]) => `<button class="chip ${f.kind === k ? 'on' : ''}" data-act="setKind" data-v="${k}" ${lock ? 'disabled' : ''}>${l}</button>`).join('')}${f.dir === 'in' && !f.editingId ? '<button class="chip ghost" data-act="goPending" data-seg="rec">Office / someone repaid me ›</button>' : ''}</div>`);
+  parts.push(`<div class="type-hint">${esc(UI_HINT[f.dir + ':' + (f.kind || '') + (f.later ? ':later' : '')] || '')}</div>`);
+  if (['me', 'income'].includes(f.kind) && !f.linkExpected && !(f.editingId && !f.later && S.entries.find(x => x.id === f.editingId)?.linkExpected)) {
+    parts.push(`<label class="inline-check" style="margin-top:-4px"><input type="checkbox" class="check" data-act="toggleLater" ${f.later ? 'checked' : ''} ${lock ? 'disabled' : ''}> ${f.dir === 'out' ? 'Not paid yet (due later)' : 'Not received yet (expected later)'}</label>`);
+  }
   parts.push(`<div class="card">
-    <div class="amount-box"><span>Rs</span><input id="amt" data-f="amount" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(f.amount)}"></div>
+    <div class="amount-box"><span>Rs</span><input id="amt" data-f="amount" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(f.amount)}"><button type="button" class="calc" data-act="amtOp" data-op="+" aria-label="Add another amount">+</button></div>
     <div class="amount-preview" id="amtPreview"></div>`);
 
-  if (has('direction')) parts.push(`<div class="field"><label>Direction</label><div class="seg">
-    <button type="button" class="${f.direction !== 'out' ? 'on' : ''}" data-act="setField" data-k="direction" data-val="in">I will receive</button>
-    <button type="button" class="${f.direction === 'out' ? 'on' : ''}" data-act="setField" data-k="direction" data-val="out">I will pay</button></div></div>`);
+
 
   if (has('paidFrom')) {
     const people = S.people.map(p => `<option value="p:${p.id}" ${f.paidFrom === 'p:' + p.id ? 'selected' : ''}>${esc(p.name)} (${pb[p.id] > 0 ? 'advance ' + money(pb[p.id]) : pb[p.id] < 0 ? 'I owe ' + money(-pb[p.id]) : 'no balance'})</option>`).join('');
     parts.push(`<div class="field"><label>Paid from</label><select data-f="paidFrom">
       <option value="">Select</option>
       <optgroup label="My accounts">${accOpts.map(a => `<option value="a:${a.id}" ${f.paidFrom === 'a:' + a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</optgroup>
+      ${f.type === 'recoverable' ? `<optgroup label="Old pending amount"><option value="old" ${f.paidFrom === 'old' ? 'selected' : ''}>Before I started the app (no account)</option></optgroup>` : ''}
       ${S.people.length ? `<optgroup label="Paid by a person (from their advance, or I owe them)">${people}</optgroup>` : ''}
     </select></div>`);
   }
   if (has('person*')) parts.push(`<div class="field"><label>Person</label><div class="row"><select class="inp grow" data-f="personId">${opt(S.people, f.personId, 'Select person')}</select><button type="button" class="btn sm" data-act="editPerson" data-fromform="personId">+ New</button></div></div>`);
-  if (has('account')) parts.push(`<div class="field"><label>${f.type === 'transfer' ? 'From account' : ['income', 'borrowed', 'received'].includes(f.type) ? 'Into account' : 'From account'}</label><select data-f="accountId">${opt(accOpts, f.accountId, 'Select account')}</select></div>`);
+  if (has('account')) parts.push(`<div class="field"><label>${f.type === 'transfer' ? 'From account' : ['income', 'borrowed', 'received'].includes(f.type) ? 'Into account' : 'From account'}</label><select data-f="accountId">${opt(accOpts, f.accountId, 'Select account')}${['lent', 'borrowed', 'advance', 'received', 'repaid'].includes(f.type) ? `<option value="__old" ${f.accountId === '__old' ? 'selected' : ''}>Before I started the app (no account)</option>` : ''}</select></div>`);
+  if ((has('paidFrom') && f.paidFrom === 'old') || (has('account') && f.accountId === '__old')) parts.push(`<div class="type-hint">Old amount: updates who owes whom, but does not change any account balance.</div>`);
   if (has('toAccount')) parts.push(`<div class="field"><label>To account</label><select data-f="toAccountId">${opt(accOpts, f.toAccountId, 'Select account')}</select></div>`);
 
   const dateLbl = T.dateLabel || 'Date';
@@ -618,12 +675,12 @@ VIEWS.add = () => {
     <div class="field"><label>${dateLbl}</label><input type="date" data-f="date" value="${esc(f.date)}"></div>
     ${showBook ? `<div class="field"><label>Book</label><select data-f="bookId">${opt(S.books, f.bookId, 'None')}</select></div>`
       : showCat ? `<div class="field"><label>Category</label><select data-f="categoryId">${opt(cats, f.categoryId, 'None')}</select></div>`
-      : has('due') ? `<div class="field"><label>Return by (optional)</label><input type="date" data-f="dueDate" value="${esc(f.dueDate)}"></div>` : '<div></div>'}
+      : has('due') ? `<div class="field"><label>${f.type === 'received' ? 'Rest promised by' : 'Return by'} (optional)</label><input type="date" data-f="dueDate" value="${esc(f.dueDate)}"></div>` : '<div></div>'}
   </div>`);
   if (showBook && showCat) parts.push(`<div class="field"><label>Category</label><select data-f="categoryId">${opt(cats, f.categoryId, 'None')}</select></div>`);
   if (has('recoverFrom')) parts.push(`<div class="field"><label>Recover from (optional)</label><div class="row"><select class="inp grow" data-f="recoverFrom">${opt(S.people, f.recoverFrom, 'Not decided yet')}</select><button type="button" class="btn sm" data-act="editPerson" data-fromform="recoverFrom">+ New</button></div></div>`);
   if (has('personOpt')) parts.push(`<div class="field"><label>From / to (optional)</label><select data-f="personId">${opt(S.people, f.personId, 'None')}</select></div>`);
-  if (has('work')) parts.push(`<div class="field"><label>Work / site (optional)</label><div class="row"><select class="inp grow" data-f="workId">${opt(S.works.filter(w => !w.closed || w.id === f.workId), f.workId, 'None')}</select><button type="button" class="btn sm" data-act="editWork" data-fromform="1">+ New</button></div></div>`);
+  if (has('work') && (f.type !== 'lent' || f.workId || person(f.personId)?.kind === 'staff')) parts.push(`<div class="field"><label>Work / site (optional)</label><div class="row"><select class="inp grow" data-f="workId">${opt(S.works.filter(w => !w.closed || w.id === f.workId), f.workId, 'None')}</select><button type="button" class="btn sm" data-act="editWork" data-fromform="1">+ New</button></div></div>`);
   if (has('repeat')) parts.push(`<div class="field"><label>Repeat</label><select data-f="repeat"><option value="">Once</option><option value="monthly" ${f.repeat === 'monthly' ? 'selected' : ''}>Every month</option></select></div>`);
   parts.push(`<div class="field"><label>Note</label><input data-f="note" value="${esc(f.note)}" placeholder="What was it for?" maxlength="200"></div>`);
   if (has('receipt')) {
@@ -635,7 +692,8 @@ VIEWS.add = () => {
   parts.push(`</div>`);
   if (!f.editingId || f.draftId) parts.push(`<label class="inline-check"><input type="checkbox" class="check" data-f="saveTpl" ${f.saveTpl ? 'checked' : ''}> Save as quick template</label>
     ${f.saveTpl ? `<div class="field"><input data-f="tplName" value="${esc(f.tplName)}" placeholder="Template name, e.g. Govt vehicle fuel"></div>` : ''}`);
-  parts.push(`<button class="btn primary block" data-act="saveForm">${f.editingId && !f.draftId ? 'Update' : 'Save'}</button>`);
+  if (f.editingId && !f.draftId) parts.push(`<button class="btn primary block" data-act="saveForm">Update</button>`);
+  else parts.push(`<div class="btn-row"><button class="btn" data-act="saveNext">Save &amp; add next</button><button class="btn primary" data-act="saveForm">Save</button></div>`);
   if (f.editingId || f.linkExpected) parts.push(`<button class="btn block mt" data-act="cancelForm">Cancel</button>`);
   return parts.join('');
 };
@@ -655,7 +713,7 @@ function afterAddRender() {
 function updateAmtPreview() {
   const el = $('#amtPreview'); if (!el) return;
   const raw = String(form.amount || '');
-  if (!raw.trim()) { el.textContent = 'Tip: you can type sums like 1200+350'; return; }
+  if (!raw.trim()) { el.textContent = 'Tap + to add several amounts, e.g. 1200 + 350'; return; }
   const v = evalAmount(raw);
   if (isNaN(v)) { el.innerHTML = '<span class="danger">Not a valid amount</span>'; return; }
   el.textContent = /[+\-*/x×]/.test(raw.replace(/^-/, '')) ? '= ' + money(v) : money(v);
@@ -670,9 +728,14 @@ function formToEntry() {
   if (has('paidFrom')) {
     if (!f.paidFrom) { toast('Select where the money came from'); return null; }
     const [k, id] = f.paidFrom.split(':');
-    if (k === 'a') e.accountId = id; else e.viaPersonId = id;
+    if (f.paidFrom === 'old') { if (f.type !== 'recoverable') { toast('Select where the money came from'); return null; } e.oldEntry = true; }
+    else if (k === 'a') e.accountId = id; else e.viaPersonId = id;
   }
-  if (has('account')) { if (!f.accountId) { toast('Select an account'); return null; } e.accountId = f.accountId; }
+  if (has('account')) {
+    if (!f.accountId) { toast('Select an account'); return null; }
+    if (f.accountId === '__old') { if (!['lent', 'borrowed', 'advance', 'received', 'repaid'].includes(f.type)) { toast('Select an account'); return null; } e.oldEntry = true; }
+    else e.accountId = f.accountId;
+  }
   if (has('toAccount')) {
     if (!f.toAccountId) { toast('Select the destination account'); return null; }
     if (f.toAccountId === f.accountId) { toast('Choose two different accounts'); return null; }
@@ -688,13 +751,23 @@ function formToEntry() {
   if (has('person*')) { if (!f.personId) { toast('Select a person'); return null; } e.personId = f.personId; }
   if (has('personOpt')) e.personId = f.personId || '';
   if (has('due')) e.dueDate = f.dueDate || '';
-  if (has('direction')) e.direction = f.direction === 'out' ? 'out' : 'in';
+  if (e.type === 'expected') e.direction = f.direction === 'out' ? 'out' : 'in';
   if (has('repeat')) e.repeat = f.repeat === 'monthly' ? 'monthly' : '';
   if (f.linkExpected) e.linkExpected = f.linkExpected;
+  if (e.type === 'lent' || e.type === 'received') {
+    const old = f.editingId ? S.entries.find(x => x.id === f.editingId) : null;
+    const grp = e.type === 'lent' ? ['lent', 'advance', 'repaid'] : ['received', 'borrowed'];
+    if (old && !old.draft && grp.includes(old.type) && old.personId === e.personId) e.type = old.type;
+    else {
+      const bal = personBalances()[e.personId] || 0, p = person(e.personId);
+      e.type = e.type === 'lent' ? (bal < 0 ? 'repaid' : (p && p.kind === 'staff') ? 'advance' : 'lent') : (bal > 0 ? 'received' : 'borrowed');
+    }
+    if (e.type === 'advance' || e.type === 'repaid') delete e.dueDate;
+  }
   return e;
 }
 
-const DIFF_KEYS = ['type', 'amount', 'date', 'accountId', 'toAccountId', 'viaPersonId', 'bookId', 'categoryId', 'workId', 'personId', 'dueDate', 'direction', 'repeat', 'note', 'receipt'];
+const DIFF_KEYS = ['type', 'amount', 'date', 'oldEntry', 'accountId', 'toAccountId', 'viaPersonId', 'bookId', 'categoryId', 'workId', 'personId', 'dueDate', 'direction', 'repeat', 'note', 'receipt'];
 function diffEntry(a, b) {
   const ch = {};
   for (const k of DIFF_KEYS) { const x = a[k] ?? '', y = b[k] ?? ''; if (x !== y) ch[k] = [x, y]; }
@@ -713,7 +786,7 @@ async function persistReceipt(oldId) {
   return form.receipt || '';
 }
 
-async function saveForm() {
+async function saveForm(again = false) {
   const e = formToEntry();
   if (!e) return;
   const f = form;
@@ -748,16 +821,26 @@ async function saveForm() {
   }
 
   if (e.linkExpected) afterExpectedPayment(e.linkExpected);
+  if (e.dueDate && e.personId && person(e.personId)) person(e.personId).dueDate = e.dueDate;
 
   if (f.saveTpl) {
     const name = (f.tplName || '').trim() || entryTitle(e);
     S.templates.push({ id: uid(), name, data: { type: e.type, amount: f.amount && !/[+\-*/]/.test(f.amount) ? String(e.amount) : '', paidFrom: f.paidFrom, accountId: f.accountId, toAccountId: f.toAccountId, bookId: e.bookId || '', categoryId: e.categoryId || '', workId: e.workId || '', personId: f.personId, recoverFrom: f.recoverFrom, note: e.note, direction: f.direction } });
   }
-  S.settings.last = { ...S.settings.last, paidFrom: f.paidFrom || S.settings.last.paidFrom, accountId: f.accountId || S.settings.last.accountId, bookId: f.bookId || S.settings.last.bookId };
+  S.settings.last = { ...S.settings.last, paidFrom: (f.paidFrom && f.paidFrom !== 'old') ? f.paidFrom : S.settings.last.paidFrom, accountId: (f.accountId && f.accountId !== '__old') ? f.accountId : S.settings.last.accountId, bookId: f.bookId || S.settings.last.bookId };
 
   await save();
   const ret = f.returnTo;
   const wasEdit = !!f.editingId && !f.draftId;
+  if (again && !wasEdit) {
+    const keep = { type: f.type, direction: f.direction, dir: f.dir, kind: f.kind, later: f.later, date: f.date, paidFrom: f.paidFrom, accountId: f.accountId, bookId: f.bookId, personId: f.personId, workId: f.workId, recoverFrom: f.recoverFrom };
+    resetForm(keep);
+    tab = 'add'; stack = []; cur = { v: 'add', p: null };
+    render(); window.scrollTo(0, 0);
+    toast('Saved. Add the next one');
+    setTimeout(() => $('#amt')?.focus(), 60);
+    return;
+  }
   resetForm();
   toast(wasEdit ? 'Updated' : 'Saved');
   if (ret) { tab = ret.tab; stack = ret.stack; cur = ret.cur; render(); }
@@ -786,8 +869,8 @@ function editEntry(id) {
   if (!TYPES[e.type]) { toast('This entry type can only be deleted, not edited'); return; }
   const over = {
     type: e.type, amount: e.draft && !e.amount ? '' : String(e.amount), date: e.date, note: e.note || '',
-    paidFrom: e.viaPersonId ? 'p:' + e.viaPersonId : (e.accountId ? 'a:' + e.accountId : ''),
-    accountId: e.accountId || '', toAccountId: e.toAccountId || '', bookId: e.bookId || '', categoryId: e.categoryId || '',
+    paidFrom: e.oldEntry ? 'old' : e.viaPersonId ? 'p:' + e.viaPersonId : (e.accountId ? 'a:' + e.accountId : ''),
+    accountId: e.oldEntry ? '__old' : (e.accountId || ''), toAccountId: e.toAccountId || '', bookId: e.bookId || '', categoryId: e.categoryId || '',
     workId: e.workId || '', personId: e.type === 'recoverable' ? '' : (e.personId || ''), recoverFrom: e.type === 'recoverable' ? (e.personId || '') : '',
     dueDate: e.dueDate || '', direction: e.direction || 'in', repeat: e.repeat || '', receipt: e.receipt || '',
     editingId: e.id, draftId: e.draft ? e.id : null, linkExpected: e.linkExpected || null
@@ -820,7 +903,7 @@ function closeExpected(x) {
 // ---------------- Pending view ----------------
 VIEWS.pending = () => {
   const seg = ui.pendingSeg;
-  const head = `<div class="seg"><button class="${seg === 'rec' ? 'on' : ''}" data-act="seg" data-seg="rec">Recoverables</button><button class="${seg === 'exp' ? 'on' : ''}" data-act="seg" data-seg="exp">Expected</button></div>`;
+  const head = `<div class="seg"><button class="${seg === 'rec' ? 'on' : ''}" data-act="seg" data-seg="rec">To get back</button><button class="${seg === 'exp' ? 'on' : ''}" data-act="seg" data-seg="exp">Upcoming</button></div>`;
   return head + (seg === 'rec' ? pendingRec() : pendingExp());
 };
 
@@ -884,7 +967,7 @@ function pendingExp() {
     <div class="tile"><div class="lbl">To receive</div><div class="val in">${money(inSum)}</div></div>
     <div class="tile"><div class="lbl">To pay</div><div class="val out">${money(outSum)}</div></div>
   </div>
-  <button class="btn block" data-act="quickType" data-type="expected">+ Add expected money</button>
+  <button class="btn block" data-act="quickType" data-type="expected">+ Add upcoming payment or income</button>
   <div class="sec-title">Open</div>
   <div class="card flush">${open.length ? open.map(row).join('') : '<div class="empty">No open items. Add TA claims, arrears, payouts, or upcoming bills.</div>'}</div>
   <div class="sec-title">Done <button data-act="toggleExpClosed">${ui.expShowClosed ? 'Hide' : 'Show'}</button></div>
@@ -1047,12 +1130,13 @@ VIEWS.security = () => `<div class="card">
   </div>`;
 
 VIEWS.help = () => `<div class="card small">
-  <p><b>Expense</b>: your own spending. Counts in "Spent this month".</p><br>
-  <p><b>Recoverable</b>: you paid, someone else should pay you back (office, company, a person). Not counted as your spending. Stays in Pending until you record a recovery or write it off. A written-off amount becomes your spending.</p><br>
-  <p><b>Paid by a person</b>: on Expense/Recoverable, choose a person under "Paid from" when staff spend from the advance you gave them, or when someone pays on your behalf (then you owe them).</p><br>
-  <p><b>Advance</b>: money given to staff for work. Their spending reduces it; "Got back" records unused cash returned.</p><br>
-  <p><b>Lent / Borrowed / Got back / Paid back</b>: loans with people. Each person has a running statement you can share.</p><br>
-  <p><b>Expected</b>: future money in (TA, arrears, payouts) or out (bills). Tap Receive/Pay when it happens; monthly items repeat automatically.</p><br>
+  <p><b>Money out → For me</b>: your own spending. Only this counts in "Spent this month". Tick "Not paid yet" for a bill due later.</p><br>
+  <p><b>Money out → Gets paid back</b>: you paid, office/company/someone repays you. Stays in Pending → To get back until you record the recovery or write it off.</p><br>
+  <p><b>Money out → Give to a person</b>: loan, staff advance, or paying back what you owe. One button; the app labels it from the person's balance.</p><br>
+  <p><b>Money in → Income</b>: salary, TA, online income. Tick "Not received yet" for a claim or payout still pending.</p><br>
+  <p><b>Money in → From a person</b>: they return money, or lend you money.</p><br>
+  <p><b>Paid by a person</b>: under "Paid from", pick a staff member when they spent from your advance (or paid for you).</p><br>
+  <p><b>Before I started the app</b>: for old loans or recoverables, choose this instead of an account. The person's balance updates, your account balances don't (that money already left or arrived before you set your opening balances).</p><br>
   <p><b>Balance check</b>: in Accounts, enter the real wallet/bank amount; the difference is saved as an adjustment so totals stay true.</p>
 </div>`;
 
@@ -1287,6 +1371,7 @@ function openPersonEditor(id, fromField) {
     <div class="field"><label>Name</label><input id="pName" value="${esc(p?.name || '')}" placeholder="Name, or office/company"></div>
     <div class="field"><label>Type</label><select id="pKind">${Object.entries(PERSON_KINDS).map(([k, v]) => `<option value="${k}" ${(p?.kind || 'friend') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
     <div class="field"><label>WhatsApp / phone (optional)</label><input id="pPhone" type="tel" value="${esc(p?.phone || '')}" placeholder="03xx xxxxxxx"></div>
+    ${p ? `<div class="field"><label>Payment promised by (optional, clear to remove)</label><input id="pDue" type="date" value="${esc(p.dueDate || '')}"></div>` : ''}
     <div class="btn-row">${p ? `<button class="btn danger" data-act="deletePerson" data-id="${p.id}">Delete</button>` : ''}<button class="btn primary" data-act="savePerson" data-id="${p?.id || ''}">Save</button></div>`);
   setTimeout(() => $('#pName')?.focus(), 50);
 }
@@ -1295,6 +1380,7 @@ async function savePerson(id) {
   if (!name) { toast('Enter a name'); return; }
   if (S.people.some(p => p.id !== id && p.name.toLowerCase() === name.toLowerCase())) { toast('A person with this name exists'); return; }
   const data = { name, kind: $('#pKind').value, phone: $('#pPhone').value.trim() };
+  if ($('#pDue')) data.dueDate = $('#pDue').value || '';
   let pid = id;
   if (id) Object.assign(person(id), data);
   else { pid = uid(); S.people.push({ id: pid, ...data }); }
@@ -1414,8 +1500,10 @@ function personStatementText(pid) {
   const lines = personLines(pid);
   const balTxt = bal > 0 ? `Balance: you owe me ${money(bal)}` : bal < 0 ? `Balance: I owe you ${money(-bal)}` : 'Balance: settled';
   const last = lines.slice(-15);
-  const body = last.map(l => `${fmtShort(l.date)} · ${l.label}${l.e.note && !l.label.startsWith('Recovered') ? ' (' + l.e.note + ')' : ''} · ${money(l.v, true)}`).join('\n');
-  return `Hisaab statement: ${p.name}\nAs of ${fmtDate(today())}\n${balTxt}\n\n${lines.length > 15 ? 'Last 15 of ' + lines.length + ' entries:\n' : 'Entries:\n'}${body || 'No entries'}\n\n(+ means you owe me more, − means less)`;
+  const say = l => ({ 'You gave': 'I gave you', 'Advance given': 'Advance to you', 'You paid them': 'I paid you', 'They gave you': 'You gave me', 'They paid you': 'You paid me', 'Spent for me': 'You spent for me', 'Recoverable': 'To be repaid to me', 'Written off': 'Waived' }[l.label] || (l.label.startsWith('Recovered') ? 'You repaid' : l.label));
+  const body = last.map(l => `${fmtShort(l.date)}: ${say(l)} ${money(Math.abs(l.v))}${l.e.note && !l.label.startsWith('Recovered') ? ' (' + l.e.note + ')' : ''}`).join('\n');
+  const due = p.dueDate && bal ? `\n${bal > 0 ? 'Promised by' : 'I will pay by'} ${fmtDate(p.dueDate)}` : '';
+  return `Hisaab: ${p.name}\nAs of ${fmtDate(today())}\n${balTxt.replace('Balance: ', '').replace(/^./, c => c.toUpperCase())}${due}\n\n${lines.length > 15 ? 'Last 15 of ' + lines.length + ' entries:\n' : ''}${body || 'No entries'}`;
 }
 function printHTML(title, meta, headCols, rows, sumHtml) {
   $('#print').innerHTML = `<h1>${esc(title)}</h1><div class="meta">${meta}</div>${sumHtml ? `<div class="sum">${sumHtml}</div>` : ''}
@@ -1650,17 +1738,26 @@ const ACT = {
   deleteEntry: el => deleteEntry(el.dataset.id),
   closeSheet: () => closeSheet(),
   confirmOk: () => { const r = confirmBox._res; confirmBox._res = null; closeSheet(); if (r) r(true); },
-  setType: el => {
-    if (el.disabled) return;
-    const t = el.dataset.type;
-    if (t === form.type) return;
-    form.type = t;
-    if (t === 'income' || t === 'expected') form.categoryId = '';
-    else if (cat(form.categoryId) && cat(form.categoryId).kind !== 'out') form.categoryId = '';
-    render();
+  setDir: el => {
+    if (el.disabled || formLocked() || form.dir === el.dataset.v) return;
+    form.dir = el.dataset.v; form.kind = form.dir === 'out' ? 'me' : form.dir === 'in' ? 'income' : ''; form.later = false;
+    deriveType(); render();
   },
+  setKind: el => {
+    if (el.disabled || formLocked() || form.kind === el.dataset.v) return;
+    form.kind = el.dataset.v; deriveType(); render();
+  },
+  toggleLater: el => { if (formLocked()) return; form.later = el.checked; deriveType(); render(); },
   setField: el => { form[el.dataset.k] = el.dataset.val; if (el.dataset.k === 'direction') form.categoryId = ''; render(); },
   saveForm: () => saveForm(),
+  saveNext: () => saveForm(true),
+  amtOp: el => {
+    const inp = $('#amt'); if (!inp) return;
+    const v = inp.value.trim();
+    if (!v || /[+\-*/]$/.test(v)) { inp.focus(); return; }
+    inp.value = v + el.dataset.op; form.amount = inp.value; updateAmtPreview();
+    inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+  },
   cancelForm: () => cancelForm(),
   pickReceipt: () => $('#fileReceipt').click(),
   removeReceipt: () => { form.receipt = ''; form.receiptData = ''; render(); },
@@ -1777,6 +1874,7 @@ document.addEventListener('input', e => {
     const k = t.dataset.f;
     form[k] = t.type === 'checkbox' ? t.checked : t.value;
     if (k === 'amount') updateAmtPreview();
+    if (k === 'personId' && form.type === 'lent') { render(); return; }
     if (k === 'saveTpl') render();
     return;
   }
