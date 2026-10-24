@@ -18,6 +18,8 @@ Option B: Netlify
 Opening index.html directly as a file also works for testing, but offline install (home-screen app) needs one of the hosted options.
 
 ## First 5 minutes
+On first open, Hisaab shows a short welcome: enter your account balances and pick your areas (Home, Office…), or try it with sample data first. The steps below are for later changes.
+
 1. More > Accounts: set the opening balance of Cash, Bank, Easypaisa, JazzCash (edit names/add more).
 2. People: add friends, staff, and your office/company as a person (type "Office / company").
 3. More > Works / sites: add works you spend on (optional).
@@ -25,12 +27,12 @@ Opening index.html directly as a file also works for testing, but offline instal
 5. More > Backup: back up weekly (share the file to Google Drive or WhatsApp yourself).
 
 ## Entry types
-- Expense: your own spending. Only this (plus write-offs and balance-check gaps) counts as "Spent".
-- Recoverable: you paid, someone pays you back later. Stays in Pending until recovered or written off.
+- My expense: your own spending. Only this (plus write-offs and balance-check gaps) counts as "Spent".
+- Paid for someone: you paid, office/company/someone repays you later. Stays in Pending until recovered or written off.
 - Paid from a person: on Expense/Recoverable, pick a staff member under "Paid from" when they spend from your advance (or pay for you).
 - Advance / Got back: money given to staff, and unused cash returned.
 - Lent / Borrowed / Got back / Paid back: loans with people.
-- Bills (Home > Bills): electricity, gas, subscriptions etc. Repeat monthly, every 2/3/6 months or yearly. Tap Pay with the real amount; the next one is created automatically.
+- Bills: pick a bill type (Electricity, Gas, Water, Internet, Mobile, Rent, Subscription, Other), name it (LESCO, Netflix), set how often (weekly to yearly) and the account you usually pay from. Tap Pay with the real amount; the next one is created automatically.
 - Insights (Home > Insights): own spending by category and book, categories above your usual, biggest expenses, last 6 months.
 
 ## Google Drive auto backup

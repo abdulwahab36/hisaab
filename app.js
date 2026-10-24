@@ -42,7 +42,8 @@ function monthLabel(ym) {
 }
 function money(n, sign = false) {
   const v = r2(n);
-  const s = Math.abs(v).toLocaleString('en-PK', { maximumFractionDigits: 2 });
+  const loc = (typeof S !== 'undefined' && S && S.settings && S.settings.numStyle === 'intl') ? 'en-US' : 'en-IN';
+  const s = Math.abs(v).toLocaleString(loc, { maximumFractionDigits: 2 });
   return (v < 0 ? '-' : (sign && v > 0 ? '+' : '')) + 'Rs ' + s;
 }
 function esc(s) {
@@ -83,6 +84,13 @@ function toast(msg) {
 }
 
 // ---------------- Storage (IndexedDB with fallback) ----------------
+const MEM = {};
+const LS = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return MEM[k] ?? null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { MEM[k] = v; } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } delete MEM[k]; },
+  keys() { try { return Object.keys(localStorage); } catch (e) { return Object.keys(MEM); } }
+};
 const DB = {
   db: null, ok: false,
   open() {
@@ -112,23 +120,23 @@ const DB = {
     });
   },
   async get(store, key) {
-    if (!DB.ok) { const v = localStorage.getItem('hisaab_' + store + '_' + key); return v ? JSON.parse(v) : undefined; }
+    if (!DB.ok) { const v = LS.get('hisaab_' + store + '_' + key); return v ? JSON.parse(v) : undefined; }
     return DB.tx(store, 'readonly', st => st.get(key));
   },
   async put(store, key, val) {
-    if (!DB.ok) { localStorage.setItem('hisaab_' + store + '_' + key, JSON.stringify(val)); return; }
+    if (!DB.ok) { LS.set('hisaab_' + store + '_' + key, JSON.stringify(val)); return; }
     return DB.tx(store, 'readwrite', st => st.put(val, key));
   },
   async del(store, key) {
-    if (!DB.ok) { localStorage.removeItem('hisaab_' + store + '_' + key); return; }
+    if (!DB.ok) { LS.del('hisaab_' + store + '_' + key); return; }
     return DB.tx(store, 'readwrite', st => st.delete(key));
   },
   async keys(store) {
-    if (!DB.ok) { const p = 'hisaab_' + store + '_'; return Object.keys(localStorage).filter(k => k.startsWith(p)).map(k => k.slice(p.length)); }
+    if (!DB.ok) { const p = 'hisaab_' + store + '_'; return LS.keys().filter(k => k.startsWith(p)).map(k => k.slice(p.length)); }
     return DB.tx(store, 'readonly', st => st.getAllKeys());
   },
   async clear(store) {
-    if (!DB.ok) { for (const k of await DB.keys(store)) localStorage.removeItem('hisaab_' + store + '_' + k); return; }
+    if (!DB.ok) { for (const k of await DB.keys(store)) LS.del('hisaab_' + store + '_' + k); return; }
     return DB.tx(store, 'readwrite', st => st.clear());
   }
 };
@@ -136,6 +144,10 @@ const DB = {
 // ---------------- State ----------------
 let S = null;
 
+const PALETTE = ['#e8590c', '#2f9e44', '#1c7ed6', '#ae3ec9', '#f08c00', '#0c8599', '#d6336c', '#5f3dc4', '#74b816', '#c92a2a', '#3b5bdb', '#868e96'];
+function catColor(id) { const c = cat(id); return (c && c.color) || '#868e96'; }
+function personColor(p) { let h = 0; for (const ch of (p && p.id) || '') h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }
+const BILL_TYPES = [['Electricity', '#f08c00'], ['Gas', '#e8590c'], ['Water', '#1c7ed6'], ['Internet', '#5f3dc4'], ['Mobile', '#0c8599'], ['Rent', '#2f9e44'], ['Subscription', '#d6336c'], ['Other bill', '#868e96']];
 function defaultState() {
   const mk = (name, extra = {}) => ({ id: uid(), name, ...extra });
   return {
@@ -143,14 +155,15 @@ function defaultState() {
     accounts: ['Cash', 'Bank', 'Easypaisa', 'JazzCash'].map(n => mk(n, { opening: 0 })),
     books: ['Home', 'Office', 'Personal', 'Car'].map(n => mk(n)),
     categories: [
-      ...['Food & grocery', 'Fuel', 'Repair & maintenance', 'Utilities', 'Transport', 'Medical', 'Shopping', 'Court / legal', 'Education', 'Other'].map(n => mk(n, { kind: 'out' })),
-      ...['Salary', 'TA / allowance', 'Online income', 'Other income'].map(n => mk(n, { kind: 'in' }))
+      ...['Food & grocery', 'Fuel', 'Repair & maintenance', 'Utilities', 'Transport', 'Medical', 'Shopping', 'Court / legal', 'Education', 'Other'].map((n, i) => mk(n, { kind: 'out', color: PALETTE[i % PALETTE.length] })),
+      ...['Salary', 'TA / allowance', 'Online income', 'Other income'].map((n, i) => mk(n, { kind: 'in', color: PALETTE[(i + 1) % PALETTE.length] })),
+      ...BILL_TYPES.map(([n, c]) => mk(n, { kind: 'out', bill: true, color: c }))
     ],
     people: [],
     works: [],
     entries: [],
     templates: [],
-    settings: { pinHash: '', pinSalt: '', lastBackup: null, alertDays: 60, lockAfter: 60, last: {}, googleClientId: '', driveDirty: false, drive: defaultDrive() }
+    settings: { pinHash: '', pinSalt: '', lastBackup: null, alertDays: 60, lockAfter: 60, last: {}, googleClientId: '', driveDirty: false, drive: defaultDrive(), onboarded: false, sample: false, numStyle: 'lakh', areaByCat: {} }
   };
 }
 function defaultDrive() {
@@ -162,17 +175,53 @@ function normalizeState(st) {
   const out = { ...d, ...st };
   for (const k of ['accounts', 'books', 'categories', 'people', 'works', 'entries', 'templates']) if (!Array.isArray(out[k])) out[k] = d[k];
   out.settings = { ...d.settings, ...(st.settings || {}) };
+  if (!st.settings || st.settings.onboarded === undefined) out.settings.onboarded = true; // existing users skip the welcome
   if (!out.settings.last) out.settings.last = {};
+  out.categories.forEach((c, i) => { if (!c.color) c.color = PALETTE[i % PALETTE.length]; });
+  if (!out.categories.some(c => c.bill)) BILL_TYPES.forEach(([n, c]) => out.categories.push({ id: uid(), name: n, kind: 'out', bill: true, color: c }));
   out.settings.drive = { ...defaultDrive(), ...((st.settings && st.settings.drive) || {}) };
   if (!out.settings.drive.imgs) out.settings.drive.imgs = {};
   return out;
 }
 
+const PREVIEW = !!(window.HISAAB_CONFIG && window.HISAAB_CONFIG.preview);
 async function load() {
   await DB.open();
   const st = await DB.get('kv', 'state');
-  S = st ? normalizeState(st) : defaultState();
-  if (!st) await save();
+  S = st ? normalizeState(st) : (PREVIEW ? sampleState() : defaultState());
+  if (/[?&]nowelcome/.test(location.search)) S.settings.onboarded = true;
+  if (!st) await saveRaw();
+}
+// Sample data for the preview link only (never used in the real app)
+function sampleState() {
+  const st = defaultState(), t = today(), d = n => addDays(t, n);
+  const A = n => st.accounts.find(a => a.name === n).id, B = n => st.books.find(b => b.name === n).id, C = n => st.categories.find(c => c.name === n).id;
+  st.accounts.find(a => a.name === 'Cash').opening = 25000;
+  st.accounts.find(a => a.name === 'Bank').opening = 180000;
+  const office = { id: uid(), name: 'Office (sample)', kind: 'org', phone: '' };
+  const staff = { id: uid(), name: 'Site staff (sample)', kind: 'staff', phone: '' };
+  const friend = { id: uid(), name: 'Friend (sample)', kind: 'friend', phone: '', dueDate: d(-3) };
+  st.people.push(office, staff, friend);
+  const work = { id: uid(), name: 'Office repair (sample)', ref: 'EST-01', closed: false };
+  st.works.push(work);
+  const E = (o) => st.entries.push({ id: uid(), createdAt: new Date().toISOString(), history: [], note: '', ...o });
+  E({ type: 'expense', amount: 4500, date: d(-2), accountId: A('Cash'), bookId: B('Car'), categoryId: C('Fuel'), note: 'Fuel' });
+  E({ type: 'expense', amount: 12800, date: d(-6), accountId: A('Bank'), bookId: B('Home'), categoryId: C('Food & grocery'), note: 'Monthly grocery' });
+  E({ type: 'expense', amount: 3000, date: addMonths(t, -1), accountId: A('Cash'), bookId: B('Car'), categoryId: C('Fuel'), note: 'Fuel' });
+  E({ type: 'expense', amount: 11000, date: addMonths(t, -1), accountId: A('Bank'), bookId: B('Home'), categoryId: C('Food & grocery'), note: 'Grocery' });
+  E({ type: 'recoverable', amount: 25000, date: d(-40), accountId: A('Bank'), bookId: B('Office'), categoryId: C('Repair & maintenance'), personId: office.id, workId: work.id, note: 'Office roof repair' });
+  E({ type: 'recoverable', amount: 3500, date: d(-75), accountId: A('Cash'), bookId: B('Office'), categoryId: C('Court / legal'), personId: office.id, note: 'Court fee' });
+  E({ type: 'advance', amount: 10000, date: d(-10), accountId: A('Bank'), personId: staff.id, workId: work.id, note: 'Site advance' });
+  E({ type: 'expense', amount: 4000, date: d(-8), viaPersonId: staff.id, bookId: B('Office'), categoryId: C('Repair & maintenance'), workId: work.id, note: 'Labour' });
+  E({ type: 'lent', amount: 10000, date: d(-20), accountId: A('Cash'), personId: friend.id, note: 'Bike repair' });
+  E({ type: 'received', amount: 4000, date: d(-5), accountId: A('Cash'), personId: friend.id, dueDate: d(-3), note: 'Part payment' });
+  E({ type: 'expected', amount: 6500, date: d(2), direction: 'out', repeat: 'monthly', bookId: B('Home'), categoryId: C('Utilities'), note: 'Electricity', closed: false });
+  E({ type: 'expected', amount: 1100, date: d(9), direction: 'out', repeat: 'monthly', bookId: B('Personal'), categoryId: C('Utilities'), note: 'Netflix', closed: false });
+  E({ type: 'expected', amount: 15000, date: d(12), direction: 'in', categoryId: C('TA / allowance'), note: 'TA claim', closed: false });
+  st.settings.lastBackup = new Date().toISOString();
+  st.settings.sample = true;
+  st.settings.onboarded = true;
+  return st;
 }
 
 let dirtySeq = 0;
@@ -199,7 +248,7 @@ const live = () => S.entries.filter(e => !e.draft);
 
 const TYPES = {
   expense:     { label: 'Expense',     hint: 'My own spending', f: ['paidFrom', 'book', 'cat', 'work', 'note', 'receipt'] },
-  recoverable: { label: 'Recoverable', hint: 'Spent now, to get back later (office, company, someone)', f: ['paidFrom', 'book', 'cat', 'work', 'recoverFrom', 'note', 'receipt'] },
+  recoverable: { label: 'To get back', hint: 'Spent now, to get back later (office, company, someone)', f: ['paidFrom', 'book', 'cat', 'work', 'recoverFrom', 'note', 'receipt'] },
   income:      { label: 'Income',      hint: 'Salary, TA, online income…', f: ['account', 'catIn', 'note', 'receipt'] },
   lent:        { label: 'Lent',        hint: 'I gave money, they will return it', f: ['person*', 'account', 'work', 'due', 'note'] },
   borrowed:    { label: 'Borrowed',    hint: 'I took money, I will return it', f: ['person*', 'account', 'due', 'note'] },
@@ -286,7 +335,7 @@ function personLines(pid) {
       case 'recoverable':
         if (e.viaPersonId === pid) push(e.date, e, 'Spent for me', -a);
         if (e.personId === pid) {
-          push(e.date, e, 'Recoverable', a);
+          push(e.date, e, 'You paid for them', a);
           if (e.writtenOff) push(e.writtenOff.date, e, 'Written off', -e.writtenOff.amount);
         }
         break;
@@ -347,7 +396,8 @@ function entryFlow(e) {
   if (e.draft) return 'neutral';
   switch (e.type) {
     case 'income': case 'borrowed': case 'received': case 'recovery': return 'in';
-    case 'expense': case 'recoverable': return e.viaPersonId ? 'neutral' : 'out';
+    case 'expense': return 'out';
+    case 'recoverable': return e.viaPersonId ? 'neutral' : 'out';
     case 'lent': case 'advance': case 'repaid': return 'out';
     case 'adjustment': return e.amount < 0 ? 'out' : 'in';
     default: return 'neutral';
@@ -358,20 +408,32 @@ function entrySub(e) {
   if (e.draft) parts[0] = 'Incomplete';
   const bk = book(e.bookId); if (bk) parts.push(bk.name);
   const p = person(e.type === 'recoverable' ? e.personId : e.personId); if (p && e.type !== 'expense') parts.push((e.type === 'recoverable' ? 'from ' : '') + p.name);
-  const vp = person(e.viaPersonId); if (vp) parts.push('paid by ' + vp.name);
+  const vp = person(e.viaPersonId); if (vp) parts.push(vp.kind === 'staff' ? 'from ' + vp.name + "'s advance" : 'paid by ' + vp.name);
   const w = work(e.workId); if (w) parts.push(w.name);
   if (e.accountId && !e.viaPersonId && e.type !== 'transfer') { const a = acc(e.accountId); if (a) parts.push(a.name); }
   if (e.oldEntry) parts.push('before app');
   return parts.join(' · ');
 }
+const STATUS_LBL = { pending: 'not paid yet', partial: 'part paid', recovered: 'paid back', 'written-off': "won't get" };
+const TYPE_ICO = { lent: '↗', advance: '↗', repaid: '↗', received: '↙', borrowed: '↙', transfer: '⇄', recovery: '↩', adjustment: '=', income: '+', expense: '•', recoverable: '↻', expected: '◷' };
+function entryIcon(e) {
+  const c = cat(e.categoryId);
+  if (c) return `<span class="ico" style="--c:${c.color}" aria-hidden="true">${esc(c.name.trim()[0] || '•').toUpperCase()}</span>`;
+  const p = person(e.personId) || person(e.viaPersonId);
+  if (p && ['lent', 'advance', 'repaid', 'received', 'borrowed', 'recovery'].includes(e.type)) return `<span class="ico" style="--c:${personColor(p)}" aria-hidden="true">${esc(p.name.trim()[0] || '?').toUpperCase()}</span>`;
+  const fl = entryFlow(e), col = e.type === 'transfer' ? 'var(--move)' : fl === 'in' ? 'var(--in)' : fl === 'out' ? 'var(--out)' : 'var(--muted)';
+  return `<span class="ico" style="--c:${col}" aria-hidden="true">${TYPE_ICO[e.type] || '•'}</span>`;
+}
+function personAvatar(p) { return `<span class="ico" style="--c:${personColor(p)}" aria-hidden="true">${esc(p.name.trim()[0] || '?').toUpperCase()}</span>`; }
 function entryItem(e, opts = {}) {
-  const fl = entryFlow(e);
+  const fl = opts.owed ? 'in' : entryFlow(e);
   const amt = e.type === 'adjustment' ? e.amount : e.amount;
-  const sign = fl === 'in' ? '+' : fl === 'out' ? '-' : '';
+  const sign = opts.owed ? '' : fl === 'in' ? '+' : fl === 'out' ? '-' : '';
   let extra = '';
-  if (e.type === 'recoverable') { const ri = recInfo(e); extra = `<div class="li-sub"><span class="badge ${ri.status}">${ri.status}</span></div>`; }
+  if (e.type === 'recoverable') { const ri = recInfo(e); extra = `<div class="li-sub"><span class="badge ${ri.status}">${STATUS_LBL[ri.status] || ri.status}</span></div>`; }
   if (e.type === 'expected') { const xi = expectedInfo(e); const od = !xi.closed && e.date < today(); extra = `<div class="li-sub"><span class="badge ${xi.closed ? 'recovered' : od ? 'overdue' : 'pending'}">${xi.closed ? 'done' : od ? 'overdue' : e.direction === 'out' ? 'to pay' : 'to receive'}</span></div>`; }
   return `<button class="list-item" data-act="openEntry" data-id="${e.id}">
+    ${entryIcon(e)}
     <div class="li-main"><div class="li-title">${esc(entryTitle(e))}${e.receipt ? ' <span class="muted small">📎</span>' : ''}</div>
     <div class="li-sub">${opts.noDate ? '' : fmtShort(e.date) + ' · '}${esc(entrySub(e))}</div></div>
     <div class="li-amt ${fl === 'in' ? 'in' : fl === 'out' ? 'out' : 'muted'}">${sign}${money(Math.abs(amt)).replace('-', '')}${extra}</div>
@@ -384,44 +446,76 @@ let stack = []; // sub-views: {v, p}
 let cur = { v: 'home', p: null };
 let ui = { pendingSeg: 'rec', recFilter: 'open', recPerson: '', sel: new Set(), expShowClosed: false, entryFilter: null, peopleQ: '' };
 
+// Bottom bar = top-level tabs (path resets). Everything else (tiles, alerts, links,
+// More) opens on top of the current screen, so Back returns step by step.
+let navDepth = 0; // history entries we pushed
+function pushHist() { history.pushState({ h: 1 }, ''); navDepth++; }
 function setTab(t) {
   if (t === 'add' && cur.v !== 'add') resetForm();
   insMonth = null;
+  if (t !== 'home' && tab === 'home' && !stack.length && navDepth === 0) pushHist(); // so Back from a tab returns Home
   tab = t; stack = []; cur = { v: t, p: null };
   render();
   window.scrollTo(0, 0);
 }
 function go(v, p = null) {
-  stack.push(cur);
+  stack.push({ ...cur, tab, y: window.scrollY });
   cur = { v, p };
-  history.pushState({ h: 1 }, '');
+  pushHist();
   render();
   window.scrollTo(0, 0);
 }
+// Open a tab's screen on top of the current one (keeps the way back)
+function jump(t) {
+  if (t === cur.v && !stack.length && tab === t) return;
+  if (t === 'add') resetForm();
+  stack.push({ ...cur, tab, y: window.scrollY });
+  tab = t; cur = { v: t, p: null };
+  if (t === 'insights') insMonth = null;
+  pushHist();
+  render();
+  window.scrollTo(0, 0);
+}
+function stepBack() {
+  const prev = stack.pop();
+  cur = { v: prev.v, p: prev.p }; tab = prev.tab || tab;
+  render();
+  window.scrollTo(0, prev.y || 0);
+}
 function back() {
   if (sheetOpen) { closeSheet(); return; }
-  if (stack.length) { cur = stack.pop(); render(); window.scrollTo(0, 0); }
+  if (stack.length) stepBack();
   else if (cur.v !== 'home') setTab('home');
 }
 window.addEventListener('popstate', () => {
-  if (sheetOpen) { closeSheet(); history.pushState({ h: 1 }, ''); return; }
-  if (stack.length) { cur = stack.pop(); render(); }
+  navDepth = Math.max(0, navDepth - 1);
+  if (sheetOpen) { closeSheet(); pushHist(); return; }
+  if (!$('#lock').hidden) { pushHist(); return; }
+  if (stack.length) stepBack();
+  else if (cur.v !== 'home' && S.settings.onboarded) { tab = 'home'; cur = { v: 'home', p: null }; render(); window.scrollTo(0, 0); }
 });
 
 const TITLES = {
-  home: 'Hisaab', people: 'People', add: 'Add entry', pending: 'Pending', more: 'More',
-  person: 'Person', accounts: 'Accounts', books: 'Books', cats: 'Categories', works: 'Works / sites', work: 'Work',
+  welcome: 'Hisaab',
+  home: 'Hisaab', people: 'People', add: 'Add entry', pending: 'Pending', more: 'Settings & more',
+  person: 'Person', accounts: 'Accounts', books: 'Areas', cats: 'Categories', works: 'Projects / sites', work: 'Project',
   templates: 'Quick templates', bills: 'Bills', insights: 'Insights', entries: 'All entries', backup: 'Backup & restore', security: 'App lock', help: 'How it works'
 };
 
 function render() {
+  const onb = !S.settings.onboarded;
+  document.body.classList.toggle('onboarding', onb);
+  if (onb) { tab = 'home'; stack = []; cur = { v: 'welcome', p: null }; }
+  else if (cur.v === 'welcome') cur = { v: 'home', p: null };
   $$('.nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $('#moreBtn').classList.toggle('on', tab === 'more');
   $('#backBtn').hidden = stack.length === 0;
   $('#lockBtn').hidden = !S.settings.pinHash;
   let title = TITLES[cur.v] || 'Hisaab';
   if (cur.v === 'person') title = person(cur.p)?.name || 'Person';
   if (cur.v === 'work') title = work(cur.p)?.name || 'Work';
   if (cur.v === 'add' && form.editingId) title = form.draftId ? 'Complete entry' : 'Edit entry';
+  if (cur.v === 'add' && form.type === 'expected' && form.direction === 'out') title = form.editingId ? 'Edit bill' : 'Add bill';
   $('#title').textContent = title;
   const fn = VIEWS[cur.v] || VIEWS.home;
   $('#view').innerHTML = fn(cur.p);
@@ -437,16 +531,16 @@ VIEWS.home = () => {
   const am = allocMap();
   const alerts = [];
   const old = live().filter(e => e.type === 'recoverable' && recInfo(e, am).remaining > 0 && daysBetween(e.date, t) > S.settings.alertDays);
-  if (old.length) alerts.push(`<button class="alert" data-act="goPending" data-seg="rec"><span class="grow"><b>${old.length} recoverable${old.length > 1 ? 's' : ''}</b> older than ${S.settings.alertDays} days · ${money(old.reduce((a, e) => a + recInfo(e, am).remaining, 0))}</span>›</button>`);
+  if (old.length) alerts.push(`<button class="alert" data-act="goPending" data-seg="rec"><span class="grow"><b>${old.length} item${old.length > 1 ? 's' : ''} to get back</b> older than ${S.settings.alertDays} days · ${money(old.reduce((a, e) => a + recInfo(e, am).remaining, 0))}</span>›</button>`);
   const od = live().filter(e => e.type === 'expected' && !expectedInfo(e).closed && e.date < t);
   const soon = live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date >= t && e.date <= addDays(t, 3));
-  if (soon.length) alerts.push(`<button class="alert info" data-act="go" data-v="bills"><span class="grow"><b>${soon.length} bill${soon.length > 1 ? 's' : ''}</b> due in the next 3 days · ${money(soon.reduce((a, e) => a + expectedInfo(e).rem, 0))}</span>›</button>`);
-  if (od.length) alerts.push(`<button class="alert" data-act="goPending" data-seg="exp"><span class="grow"><b>${od.length} expected item${od.length > 1 ? 's' : ''}</b> overdue</span>›</button>`);
+  if (soon.length) alerts.push(`<button class="alert info" data-act="jump" data-tab="bills"><span class="grow"><b>${soon.length} bill${soon.length > 1 ? 's' : ''}</b> due in the next 3 days · ${money(soon.reduce((a, e) => a + expectedInfo(e).rem, 0))}</span>›</button>`);
+  if (od.length) alerts.push(`<button class="alert" data-act="goPending" data-seg="exp"><span class="grow"><b>${od.length} payment${od.length > 1 ? 's' : ''}</b> past due date</span>›</button>`);
   const drafts = S.entries.filter(e => e.draft);
   const pbAll = personBalances();
   const dueP = S.people.filter(p => p.dueDate && pbAll[p.id] && p.dueDate <= t).sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
   if (dueP.length === 1) { const p = dueP[0], b = pbAll[p.id]; alerts.push(`<button class="alert" data-act="go" data-v="person" data-p="${p.id}"><span class="grow"><b>${esc(p.name)}</b> · ${b > 0 ? money(b) + ' was promised to you' : 'you promised to pay ' + money(-b)} by ${fmtShort(p.dueDate)}</span>›</button>`); }
-  else if (dueP.length > 1) alerts.push(`<button class="alert" data-act="tab" data-tab="people"><span class="grow"><b>${dueP.length} people</b> past a promised payment date</span>›</button>`);
+  else if (dueP.length > 1) alerts.push(`<button class="alert" data-act="jump" data-tab="people"><span class="grow"><b>${dueP.length} people</b> past a promised payment date</span>›</button>`);
   if (drafts.length) alerts.push(`<button class="alert info" data-act="goEntries" data-filter="draft"><span class="grow"><b>${drafts.length} incomplete</b> receipt${drafts.length > 1 ? 's' : ''} to fill in</span>›</button>`);
   const dv = S.settings.drive;
   if (dv.connected && dv.needsReconnect) {
@@ -455,17 +549,39 @@ VIEWS.home = () => {
     const lb = latestBackup();
     if (live().length >= 5 && (!lb || daysBetween(lb.slice(0, 10), t) > 7)) alerts.push(`<button class="alert" data-act="go" data-v="backup"><span class="grow"><b>Backup due</b> · ${lb ? 'last ' + fmtDate(lb.slice(0, 10)) : 'never backed up'}${dv.connected ? '' : ' · set up auto backup'}</span>›</button>`);
   }
-  if (!live().length && S.accounts.every(a => !Number(a.opening))) alerts.push(`<button class="alert info" data-act="go" data-v="accounts"><span class="grow"><b>Start here:</b> set opening balances of your accounts</span>›</button>`);
+  if (!live().length && S.accounts.every(a => !Number(a.opening))) alerts.push(`<button class="alert info" data-act="go" data-v="accounts"><span class="grow"><b>Start here:</b> enter how much is in your cash and bank today</span>›</button>`);
 
-  // spending by book
-  const sb = Object.entries(s.spent.byBook).sort((a, b) => b[1] - a[1]);
-  const maxB = Math.max(1, ...sb.map(x => x[1]));
-  const bookBars = sb.length ? sb.map(([id, v]) => {
-    const name = id === '_unrec' ? 'Unrecorded (balance check)' : id === '_none' ? 'No book' : (book(id)?.name || 'Deleted');
-    return `<div class="bar-row"><div class="bar-top"><span>${esc(name)}</span><b>${money(v)}</b></div><div class="bar"><i style="width:${(v / maxB) * 100}%"></i></div></div>`;
-  }).join('') : '<div class="muted small">No own spending this month yet.</div>';
+  const bs = billStats(t);
+  const recent = [...S.entries].filter(e => !e.draft && e.type !== 'expected').sort(sortDesc).slice(0, 8);
+  const shownAlerts = ui.allAlerts ? alerts : alerts.slice(0, 2);
+  return `${sampleBanner()}
+  <div class="tiles">
+    <button class="tile" data-act="goEntries" data-filter="spent"><div class="lbl">Spent this month</div><div class="val out">${money(s.spent.total)}</div><div class="sub">your own money</div></button>
+    <button class="tile" data-act="jump" data-tab="people"><div class="lbl">Owed to me</div><div class="val in">${money(s.owedToMe)}</div><div class="sub">people &amp; office</div></button>
+    <button class="tile" data-act="jump" data-tab="people"><div class="lbl">I owe</div><div class="val ${s.iOwe ? 'out' : ''}">${money(s.iOwe)}</div><div class="sub">to people</div></button>
+    <button class="tile" data-act="jump" data-tab="bills"><div class="lbl">Bills · 30 days</div><div class="val ${bs.overdue ? 'danger' : bs.count ? 'out' : ''}">${money(bs.total)}</div><div class="sub">${bs.count ? bs.count + ' unpaid' + (bs.overdue ? ', some overdue' : '') : 'nothing due'}</div></button>
+  </div>
+  <div class="cashline"><span>Cash &amp; bank now</span><b>${money(s.cash)}</b></div>
+  ${shownAlerts.join('')}
+  ${alerts.length > 2 ? `<button class="link small" style="margin:-2px 2px 8px" data-act="toggleAlerts">${ui.allAlerts ? 'Show less' : 'Show ' + (alerts.length - 2) + ' more'}</button>` : ''}
+  <div class="sec-title">Quick add</div>
+  <div class="chips">
+    <button class="chip ghost" data-act="snap">📷 Snap receipt</button>
+    ${S.templates.map(tp => `<button class="chip" data-act="useTpl" data-id="${tp.id}">${esc(tp.name)}</button>`).join('')}
+  </div>
+  ${S.templates.length ? '' : '<p class="muted small" style="margin:6px 2px 0">Tip: tick "Save as quick template" when adding something you repeat, like fuel. It will appear here for one-tap entry.</p>'}
+  <div class="sec-title">Recent <span><button data-act="goSearch">Search</button> · <button data-act="goEntries" data-filter="">All</button></span></div>
+  <div class="card flush">${recent.length ? recent.map(e => entryItem(e)).join('') : '<div class="empty">Nothing yet. Tap the <b>+</b> button below to add your first entry.<br><button class="link mt" data-act="go" data-v="help">How Hisaab works</button></div>'}</div>`;
+};
 
-  // pending by age
+function sampleBanner() {
+  if (!S.settings.sample) return '';
+  return PREVIEW
+    ? `<div class="alert info"><span class="grow"><b>Preview</b> with sample data. Changes stay in this browser only.</span><button class="link" data-act="resetSample">Reset</button></div>`
+    : `<div class="alert info"><span class="grow"><b>Sample data.</b> Look around freely, then start with your own.</span><button class="link" data-act="clearSample">Start fresh</button></div>`;
+}
+function ageBarsHtml() {
+  const am = allocMap(), t = today();
   const buckets = [['0–30 days', 0, 30, ''], ['31–60 days', 31, 60, ''], ['61–90 days', 61, 90, 'w'], ['Over 90 days', 91, 1e9, 'd']].map(b => ({ label: b[0], min: b[1], max: b[2], cls: b[3], v: 0 }));
   for (const e of live()) if (e.type === 'recoverable') {
     const rem = recInfo(e, am).remaining; if (rem <= 0) continue;
@@ -473,40 +589,10 @@ VIEWS.home = () => {
     const bk = buckets.find(b => age >= b.min && age <= b.max) || buckets[0];
     bk.v = r2(bk.v + rem);
   }
+  if (!buckets.some(b => b.v > 0)) return '';
   const maxA = Math.max(1, ...buckets.map(b => b.v));
-  const anyPending = buckets.some(b => b.v > 0);
-  const ageBars = anyPending ? buckets.map(b => `<div class="bar-row"><div class="bar-top"><span>${b.label}</span><b>${money(b.v)}</b></div><div class="bar ${b.cls}"><i style="width:${(b.v / maxA) * 100}%"></i></div></div>`).join('') : '<div class="muted small">Nothing pending to recover.</div>';
-
-  const bs = billStats(t), ins = insightTeaser(t);
-  const recent = [...S.entries].filter(e => !e.draft && e.type !== 'expected').sort(sortDesc).slice(0, 8);
-  const expNet = r2(s.expIn - s.expOut);
-
-  return `
-  <div class="tiles">
-    <button class="tile" data-act="goEntries" data-filter="spent"><div class="lbl">Spent this month</div><div class="val out">${money(s.spent.total)}</div><div class="sub">own money only</div></button>
-    <button class="tile" data-act="tab" data-tab="people"><div class="lbl">Owed to me</div><div class="val in">${money(s.owedToMe)}</div><div class="sub">loans, advances, recoverables</div></button>
-    <button class="tile" data-act="tab" data-tab="people"><div class="lbl">I owe</div><div class="val ${s.iOwe ? 'out' : ''}">${money(s.iOwe)}</div><div class="sub">to people</div></button>
-    <button class="tile" data-act="goPending" data-seg="exp"><div class="lbl">Expected · 30 days</div><div class="val ${expNet >= 0 ? 'in' : 'out'}">${money(expNet, true)}</div><div class="sub">in ${money(s.expIn)} · out ${money(s.expOut)}</div></button>
-  </div>
-  <div class="cashline"><span>Cash & bank total</span><b>${money(s.cash)}</b></div>
-  <div class="tiles">
-    <button class="tile" data-act="go" data-v="bills"><div class="lbl">Bills</div><div class="val ${bs.overdue ? 'danger' : ''}" style="font-size:16px">${bs.count ? bs.count + ' due · 30 days' : 'None due'}</div><div class="sub">${bs.count ? money(bs.total) : 'add electricity, Netflix…'}</div></button>
-    <button class="tile" data-act="go" data-v="insights"><div class="lbl">Insights</div><div class="val" style="font-size:16px">${ins.text}</div><div class="sub">${ins.sub}</div></button>
-  </div>
-  ${alerts.join('')}
-  <div class="sec-title">Quick add</div>
-  <div class="chips">
-    <button class="chip ghost" data-act="snap">📷 Snap receipt</button>
-    ${S.templates.map(tp => `<button class="chip" data-act="useTpl" data-id="${tp.id}">${esc(tp.name)}</button>`).join('')}
-    ${S.templates.length ? '' : '<span class="muted small" style="align-self:center">Save frequent entries as templates from the Add screen</span>'}
-  </div>
-  <div class="sec-title">Own spending · ${monthLabel(t.slice(0, 7))}</div>
-  <div class="card">${bookBars}</div>
-  <div class="sec-title">Pending to recover · by age</div>
-  <div class="card">${ageBars}</div>
-  <div class="sec-title">Recent <button data-act="goEntries" data-filter="">All entries</button></div>
-  <div class="card flush">${recent.length ? recent.map(e => entryItem(e)).join('') : '<div class="empty">No entries yet. Tap + to add one.</div>'}</div>`;
-};
+  return `<div class="card">${buckets.map(b => `<div class="bar-row"><div class="bar-top"><span>${b.label}</span><b>${money(b.v)}</b></div><div class="bar ${b.cls}"><i style="width:${(b.v / maxA) * 100}%"></i></div></div>`).join('')}</div>`;
+}
 
 function dueTag(p, bal) {
   if (!p.dueDate || !bal) return '';
@@ -522,6 +608,11 @@ function sortDesc(a, b) {
 }
 
 VIEWS.people = () => {
+  const seg = ui.peopleSeg || 'people';
+  const head = `<div class="seg"><button class="${seg === 'people' ? 'on' : ''}" data-act="peopleSeg" data-seg="people">People</button><button class="${seg === 'rec' ? 'on' : ''}" data-act="peopleSeg" data-seg="rec">To get back</button></div>`;
+  return head + (seg === 'rec' ? pendingRec() : peopleList());
+};
+function peopleList() {
   const pb = personBalances();
   const q = ui.peopleQ.trim().toLowerCase();
   const list = S.people.filter(p => !q || p.name.toLowerCase().includes(q))
@@ -541,10 +632,11 @@ VIEWS.people = () => {
     const v = pb[p.id] || 0;
     const st = v > 0 ? `<span class="in">owes you</span>` : v < 0 ? `<span class="out">you owe</span>` : '<span class="muted">settled</span>';
     return `<button class="list-item" data-act="go" data-v="person" data-p="${p.id}">
+      ${personAvatar(p)}
       <div class="li-main"><div class="li-title">${esc(p.name)}</div><div class="li-sub">${dueTag(p, v) || esc(PERSON_KINDS[p.kind] || '') + (p.phone ? ' · ' + esc(p.phone) : '')}</div></div>
       <div class="li-amt">${money(Math.abs(v))}<div class="li-sub">${st}</div></div></button>`;
   }).join('') : `<div class="empty">${q ? 'No match.' : 'No people yet. Add friends, staff, or your office/company as a person.'}</div>`}</div>`;
-};
+}
 
 VIEWS.person = (pid) => {
   const p = person(pid);
@@ -564,21 +656,16 @@ VIEWS.person = (pid) => {
   <div class="qa">
     <button data-act="quickType" data-type="lent" data-p="${pid}">I gave</button>
     <button data-act="quickType" data-type="received" data-p="${pid}">I received</button>
-    <button data-act="quickType" data-type="spentBy" data-p="${pid}">They spent for me</button>
+    <button data-act="quickType" data-type="spentBy" data-p="${pid}">${p.kind === 'staff' ? 'Spent from advance' : 'Paid for me'}</button>
   </div>
-  <div class="btn-row">
-    <button class="btn sm" data-act="shareWA" data-p="${pid}">WhatsApp statement</button>
-    <button class="btn sm" data-act="printPerson" data-p="${pid}">PDF / print</button>
-    <button class="btn sm" data-act="editPerson" data-id="${pid}">Edit</button>
-  </div>
-  ${openRec.length ? `<div class="sec-title">Pending recoverables from ${esc(p.name)} <button data-act="recoverForPerson" data-p="${pid}">Record recovery</button></div>
-  <div class="card flush">${openRec.sort(sortDesc).map(e => entryItem(e)).join('')}</div>` : ''}
+  <div class="linkrow"><button class="link" data-act="shareWA" data-p="${pid}">Send statement on WhatsApp</button><span>·</span><button class="link" data-act="printPerson" data-p="${pid}">PDF</button><span>·</span><button class="link" data-act="editPerson" data-id="${pid}">Edit</button></div>
+  ${openRec.length ? `<div class="sec-title">${esc(p.name)} still owes you for <button data-act="recoverForPerson" data-p="${pid}">They paid</button></div>
+  <div class="card flush">${openRec.sort(sortDesc).map(e => entryItem(e, { owed: true })).join('')}</div>` : ''}
   <div class="sec-title">Statement (${lines.length})</div>
-  <div class="card flush">${lines.length ? `<table class="ledger">${[...lines].reverse().map(l => `
+  <div class="card flush">${lines.length ? `<table class="ledger"><thead><tr><th>What happened</th><th class="num">Amount</th><th class="num">Balance after</th></tr></thead>${[...lines].reverse().map(l => `
     <tr data-act="openEntry" data-id="${l.e.id}"><td><div>${esc(l.label)}</div><div class="muted small">${fmtShort(l.date)}${l.e.note && !l.label.startsWith('Recovered') ? ' · ' + esc(l.e.note) : ''}${l.e.workId && work(l.e.workId) ? ' · ' + esc(work(l.e.workId).name) : ''}</div></td>
-    <td class="num ${l.v > 0 ? 'in' : 'out'}">${money(l.v, true)}</td>
-    <td class="num muted">${money(l.bal)}</td></tr>`).join('')}</table>` : '<div class="empty">No entries with this person yet.</div>'}</div>
-  <p class="muted small mt">+ means they owe you more, − means less. Last column is the running balance.</p>`;
+    <td class="num">${money(Math.abs(l.v))}</td>
+    <td class="num"><span class="${l.bal > 0 ? 'in' : l.bal < 0 ? 'out' : 'muted'}">${l.bal > 0 ? 'owes ' + money(l.bal) : l.bal < 0 ? 'you owe ' + money(-l.bal) : 'settled'}</span></td></tr>`).join('')}</table>` : '<div class="empty">No entries with this person yet.</div>'}</div>`;
 };
 
 // ---------------- Add / edit form ----------------
@@ -609,13 +696,13 @@ function formLocked() {
   return !!(e && e.type === 'recoverable' && !e.draft && recInfo(e).recovered > 0);
 }
 const UI_HINT = {
-  'out:me': 'Your own spending. Counts in "Spent this month".',
-  'out:me:later': 'Not paid yet. Shows under Pending → Upcoming until you tap Pay.',
-  'out:back': 'You paid, but office, company or someone will repay you. Not your spending; stays in Pending until recovered.',
-  'out:person': 'Cash handed to someone: a loan, a staff advance, or paying back what you owe. The app works out which from their balance.',
+  'out:me': 'Your own spending: grocery, fuel, bills. Counts in "Spent this month".',
+  'out:me:later': 'Not paid yet. Shows in Bills until you tap Pay.',
+  'out:back': 'You paid on behalf of your office, company or a person, and they will repay you. Not your spending; listed under People → To get back.',
+  'out:person': 'Money handed to someone: a loan, a staff advance, or paying back what you owe them. The app works out which from their balance.',
   'in:income': 'Salary, TA, online income…',
-  'in:income:later': 'Not received yet (TA claim, arrears, payout). Shows under Pending → Upcoming until you tap Receive.',
-  'in:person': 'Money from someone: they return what they owe you, or they lend you money.',
+  'in:income:later': 'Not received yet (TA claim, arrears, payout). Shows under People → To get back until you tap Receive.',
+  'in:person': 'Someone returned your money, or lent you money.',
   'move:': 'Move money between your own accounts.'
 };
 function resetForm(over = {}) {
@@ -646,60 +733,78 @@ VIEWS.add = () => {
     parts.push(S.templates.length ? `<div class="chips" style="margin-bottom:12px">${S.templates.map(tp => `<button class="chip" data-act="useTpl" data-id="${tp.id}">${esc(tp.name)}</button>`).join('')}</div>` : '');
   }
   const lock = formLocked();
+  const billOnly = f.type === 'expected' && f.direction === 'out' && (f.billOnly || f.editingId);
+  if (billOnly) parts.push(`<div class="type-hint">A bill you pay regularly. Tap Pay in Bills when you pay it.</div>`);
   const segBtn = (v, label) => `<button type="button" class="${f.dir === v ? 'on' : ''}" data-act="setDir" data-v="${v}" ${lock ? 'disabled' : ''}>${label}</button>`;
-  parts.push(`<div class="seg">${segBtn('out', 'Money out')}${segBtn('in', 'Money in')}${segBtn('move', 'Transfer')}</div>`);
-  const kinds = f.dir === 'out' ? [['me', 'For me'], ['back', 'Gets paid back'], ['person', 'Give to a person']]
-    : f.dir === 'in' ? [['income', 'Income'], ['person', 'From a person']] : [];
-  if (kinds.length) parts.push(`<div class="chips" style="margin-bottom:8px">${kinds.map(([k, l]) => `<button class="chip ${f.kind === k ? 'on' : ''}" data-act="setKind" data-v="${k}" ${lock ? 'disabled' : ''}>${l}</button>`).join('')}${f.dir === 'in' && !f.editingId ? '<button class="chip ghost" data-act="goPending" data-seg="rec">Office / someone repaid me ›</button>' : ''}</div>`);
-  parts.push(`<div class="type-hint">${esc(UI_HINT[f.dir + ':' + (f.kind || '') + (f.later ? ':later' : '')] || '')}</div>`);
-  if (['me', 'income'].includes(f.kind) && !f.linkExpected && !(f.editingId && !f.later && S.entries.find(x => x.id === f.editingId)?.linkExpected)) {
+  if (!billOnly) parts.push(`<div class="seg dir">${segBtn('out', 'Money out')}${segBtn('in', 'Money in')}${segBtn('move', 'Transfer')}</div>`);
+  const kinds = f.dir === 'out' ? [['me', 'My expense'], ['back', 'Paid for someone'], ['person', 'Gave to someone']]
+    : f.dir === 'in' ? [['income', 'Income'], ['person', 'Got from someone']] : [];
+  if (kinds.length && !billOnly) parts.push(`<div class="chips" style="margin-bottom:8px">${kinds.map(([k, l]) => `<button class="chip ${f.kind === k ? 'on' : ''}" data-act="setKind" data-v="${k}" ${lock ? 'disabled' : ''}>${l}</button>`).join('')}</div>`);
+  if (!billOnly) parts.push(`<div class="type-hint">${esc(UI_HINT[f.dir + ':' + (f.kind || '') + (f.later ? ':later' : '')] || '')}</div>`);
+  if (f.dir === 'in' && !f.editingId && live().some(e => e.type === 'recoverable' && recInfo(e).remaining > 0)) parts.push(`<div class="type-hint">Getting back money you spent for office or someone? <button class="link small" data-act="goPending" data-seg="rec">Mark it in To get back ›</button></div>`);
+  if (!billOnly && ['me', 'income'].includes(f.kind) && !f.linkExpected && !(f.editingId && !f.later && S.entries.find(x => x.id === f.editingId)?.linkExpected)) {
     parts.push(`<label class="inline-check" style="margin-top:-4px"><input type="checkbox" class="check" data-act="toggleLater" ${f.later ? 'checked' : ''} ${lock ? 'disabled' : ''}> ${f.dir === 'out' ? 'Not paid yet (due later)' : 'Not received yet (expected later)'}</label>`);
   }
   parts.push(`<div class="card">
-    <div class="amount-box"><span>Rs</span><input id="amt" data-f="amount" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(f.amount)}"><button type="button" class="calc" data-act="amtOp" data-op="+" aria-label="Add another amount">+</button></div>
+    <div class="amount-box"><span>Rs</span><input id="amt" data-f="amount" inputmode="decimal" autocomplete="off" placeholder="0" value="${esc(f.amount)}"><button type="button" class="calc" data-act="amtOp" data-op="+" aria-label="Add another amount">+ another</button></div>
     <div class="amount-preview" id="amtPreview"></div>`);
 
 
 
+  const extra = [];
+  const dateLbl = T.dateLabel || 'Date';
+  const showBook = has('book') && !(f.type === 'expected' && f.direction !== 'out'), showCat = has('cat') || has('catIn') || has('catAny');
+  const catKind = has('cat') ? 'out' : has('catIn') ? 'in' : (f.direction === 'out' ? 'out' : 'in');
+  const use = {}; live().forEach(e => { if (e.categoryId) use[e.categoryId] = (use[e.categoryId] || 0) + 1; });
+  const billMode = f.type === 'expected' && f.direction === 'out';
+  const cats = S.categories.filter(c => c.kind === catKind && (billMode ? c.bill : (!c.bill || c.id === f.categoryId))).map((c, i) => ({ c, i })).sort((a, b) => (use[b.c.id] || 0) - (use[a.c.id] || 0) || a.i - b.i).map(x => x.c);
+  const OLD_LBL = 'Old amount, from before I used Hisaab';
+  // --- essentials
+  if (showCat) parts.push(`<div class="field"><label>${billMode ? 'Bill type' : 'Category'}</label><div class="chips">${cats.map(c => `<button type="button" class="chip cat ${f.categoryId === c.id ? 'on' : ''}" style="--c:${c.color || '#868e96'}" data-act="pickCat" data-id="${c.id}"><i></i>${esc(c.name)}</button>`).join('')}<button type="button" class="chip ghost" data-act="editSimple" data-kind="${billMode ? 'catbill' : catKind === 'in' ? 'catin' : 'catout'}" data-fromform="1">+ New</button></div></div>`);
+  if (has('person*') && !S.people.length) parts.push(`<div class="field"><label>${f.type === 'lent' ? 'To whom' : 'From whom'}</label><button type="button" class="btn primary block" data-act="editPerson" data-fromform="personId">+ Add the person first</button></div>`);
+  else if (has('person*')) parts.push(`<div class="field"><label>${f.type === 'lent' ? 'To whom' : 'From whom'}</label><div class="row"><select class="inp grow" data-f="personId">${opt(S.people, f.personId, 'Select person')}</select><button type="button" class="btn sm" data-act="editPerson" data-fromform="personId">+ New</button></div></div>`);
   if (has('paidFrom')) {
     const people = S.people.map(p => `<option value="p:${p.id}" ${f.paidFrom === 'p:' + p.id ? 'selected' : ''}>${esc(p.name)} (${pb[p.id] > 0 ? 'advance ' + money(pb[p.id]) : pb[p.id] < 0 ? 'I owe ' + money(-pb[p.id]) : 'no balance'})</option>`).join('');
     parts.push(`<div class="field"><label>Paid from</label><select data-f="paidFrom">
       <option value="">Select</option>
       <optgroup label="My accounts">${accOpts.map(a => `<option value="a:${a.id}" ${f.paidFrom === 'a:' + a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</optgroup>
-      ${f.type === 'recoverable' ? `<optgroup label="Old pending amount"><option value="old" ${f.paidFrom === 'old' ? 'selected' : ''}>Before I started the app (no account)</option></optgroup>` : ''}
-      ${S.people.length ? `<optgroup label="Paid by a person (from their advance, or I owe them)">${people}</optgroup>` : ''}
+      ${f.type === 'recoverable' ? `<optgroup label="Old pending amount"><option value="old" ${f.paidFrom === 'old' ? 'selected' : ''}>${OLD_LBL}</option></optgroup>` : ''}
+      ${S.people.length ? `<optgroup label="Someone paid for me (staff advance, or I owe them)">${people}</optgroup>` : ''}
     </select></div>`);
   }
-  if (has('person*')) parts.push(`<div class="field"><label>Person</label><div class="row"><select class="inp grow" data-f="personId">${opt(S.people, f.personId, 'Select person')}</select><button type="button" class="btn sm" data-act="editPerson" data-fromform="personId">+ New</button></div></div>`);
-  if (has('account')) parts.push(`<div class="field"><label>${f.type === 'transfer' ? 'From account' : ['income', 'borrowed', 'received'].includes(f.type) ? 'Into account' : 'From account'}</label><select data-f="accountId">${opt(accOpts, f.accountId, 'Select account')}${['lent', 'borrowed', 'advance', 'received', 'repaid'].includes(f.type) ? `<option value="__old" ${f.accountId === '__old' ? 'selected' : ''}>Before I started the app (no account)</option>` : ''}</select></div>`);
+  if (has('account')) parts.push(`<div class="field"><label>${f.type === 'transfer' ? 'From account' : ['income', 'borrowed', 'received'].includes(f.type) ? 'Into account' : 'From account'}</label><select data-f="accountId">${opt(accOpts, f.accountId, 'Select account')}${['lent', 'borrowed', 'advance', 'received', 'repaid'].includes(f.type) ? `<option value="__old" ${f.accountId === '__old' ? 'selected' : ''}>${OLD_LBL} (no account)</option>` : ''}</select></div>`);
   if ((has('paidFrom') && f.paidFrom === 'old') || (has('account') && f.accountId === '__old')) parts.push(`<div class="type-hint">Old amount: updates who owes whom, but does not change any account balance.</div>`);
   if (has('toAccount')) parts.push(`<div class="field"><label>To account</label><select data-f="toAccountId">${opt(accOpts, f.toAccountId, 'Select account')}</select></div>`);
-
-  const dateLbl = T.dateLabel || 'Date';
-  const showBook = has('book') && !(f.type === 'expected' && f.direction !== 'out'), showCat = has('cat') || has('catIn') || has('catAny');
-  const catKind = has('cat') ? 'out' : has('catIn') ? 'in' : (f.direction === 'out' ? 'out' : 'in');
-  const cats = S.categories.filter(c => c.kind === catKind);
-  parts.push(`<div class="two">
-    <div class="field"><label>${dateLbl}</label><input type="date" data-f="date" value="${esc(f.date)}"></div>
-    ${showBook ? `<div class="field"><label>Book</label><select data-f="bookId">${opt(S.books, f.bookId, 'None')}</select></div>`
-      : showCat ? `<div class="field"><label>Category</label><select data-f="categoryId">${opt(cats, f.categoryId, 'None')}</select></div>`
-      : has('due') ? `<div class="field"><label>${f.type === 'received' ? 'Rest promised by' : 'Return by'} (optional)</label><input type="date" data-f="dueDate" value="${esc(f.dueDate)}"></div>` : '<div></div>'}
-  </div>`);
-  if (showBook && showCat) parts.push(`<div class="field"><label>Category</label><select data-f="categoryId">${opt(cats, f.categoryId, 'None')}</select></div>`);
-  if (has('recoverFrom')) parts.push(`<div class="field"><label>Recover from (optional)</label><div class="row"><select class="inp grow" data-f="recoverFrom">${opt(S.people, f.recoverFrom, 'Not decided yet')}</select><button type="button" class="btn sm" data-act="editPerson" data-fromform="recoverFrom">+ New</button></div></div>`);
-  if (has('personOpt')) parts.push(`<div class="field"><label>From / to (optional)</label><select data-f="personId">${opt(S.people, f.personId, 'None')}</select></div>`);
-  if (has('work') && (f.type !== 'lent' || f.workId || person(f.personId)?.kind === 'staff')) parts.push(`<div class="field"><label>Work / site (optional)</label><div class="row"><select class="inp grow" data-f="workId">${opt(S.works.filter(w => !w.closed || w.id === f.workId), f.workId, 'None')}</select><button type="button" class="btn sm" data-act="editWork" data-fromform="1">+ New</button></div></div>`);
-  if (has('repeat')) parts.push(`<div class="field"><label>Repeats</label><select data-f="repeat"><option value="">Once</option>${Object.entries(REPEAT_LBL).map(([k, l]) => `<option value="${k}" ${f.repeat === k ? 'selected' : ''}>${l[0].toUpperCase() + l.slice(1)}</option>`).join('')}</select></div>`);
-  parts.push(`<div class="field"><label>Note</label><input data-f="note" value="${esc(f.note)}" placeholder="What was it for?" maxlength="200"></div>`);
+  if (has('recoverFrom')) parts.push(`<div class="field"><label>Who repays you? (optional)</label><div class="row"><select class="inp grow" data-f="recoverFrom">${opt(S.people, f.recoverFrom, 'Not decided yet')}</select><button type="button" class="btn sm" data-act="editPerson" data-fromform="recoverFrom">+ New</button></div></div>`);
+  const dateField = `<div class="field"><label>${dateLbl}</label><input type="date" data-f="date" value="${esc(f.date)}"></div>`;
+  const repeatField = `<div class="field"><label>How often</label><select data-f="repeat">${REPEAT_OPT.map(([k, l]) => `<option value="${k}" ${(f.repeat || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
+  if (billMode) {
+    parts.push(`<div class="field"><label>Bill name</label><input data-f="note" value="${esc(f.note)}" placeholder="e.g. LESCO, SNGPL, PTCL, Netflix" maxlength="80"></div>`);
+    parts.push(`<div class="two">${dateField}${repeatField}</div>`);
+    if (f.repeat && f.date) parts.push(`<div class="type-hint">After you pay, the next one is due on <b>${fmtDate(nextDue(f.date, f.repeat))}</b>.</div>`);
+    parts.push(`<div class="field"><label>Usually paid from</label><select data-f="accountId">${opt(accOpts, f.accountId, 'Choose when paying')}</select></div>`);
+  } else if (f.type === 'expected') {
+    parts.push(`<div class="two">${dateField}${repeatField}</div>`);
+  } else extra.push(dateField);
+  // --- more details
+  if (showBook) extra.push(`<div class="field"><label>Area <span class="muted">(Home, Office, Car…)</span></label><select data-f="bookId">${opt(S.books, f.bookId, 'None')}</select></div>`);
+  if (has('due')) extra.push(`<div class="field"><label>${f.type === 'received' ? 'Rest promised by' : 'Return by'} (optional)</label><input type="date" data-f="dueDate" value="${esc(f.dueDate)}"></div>`);
+  if (has('personOpt') && !billMode) extra.push(`<div class="field"><label>From / to (optional)</label><select data-f="personId">${opt(S.people, f.personId, 'None')}</select></div>`);
+  if (has('work') && (f.type !== 'lent' || f.workId || person(f.personId)?.kind === 'staff')) extra.push(`<div class="field"><label>Project / site (optional)</label><div class="row"><select class="inp grow" data-f="workId">${opt(S.works.filter(w => !w.closed || w.id === f.workId), f.workId, 'None')}</select><button type="button" class="btn sm" data-act="editWork" data-fromform="1">+ New</button></div></div>`);
+  if (!billMode) extra.push(`<div class="field"><label>Note</label><input data-f="note" value="${esc(f.note)}" placeholder="What was it for?" maxlength="200"></div>`);
   if (has('receipt')) {
     const src = f.receiptData || (f.receipt ? imgCache[f.receipt] : '');
-    parts.push(`<div class="field"><label>Receipt</label>${(f.receiptData || f.receipt)
+    extra.push(`<div class="field"><label>Receipt</label>${(f.receiptData || f.receipt)
       ? `<div class="receipt-thumb"><img id="rcptImg" src="${src || ''}" alt="Receipt"><button type="button" data-act="removeReceipt">×</button></div>`
       : `<button type="button" class="btn sm" data-act="pickReceipt">📎 Attach photo</button>`}</div>`);
   }
-  parts.push(`</div>`);
-  if (!f.editingId || f.draftId) parts.push(`<label class="inline-check"><input type="checkbox" class="check" data-f="saveTpl" ${f.saveTpl ? 'checked' : ''}> Save as quick template</label>
+  if (!f.editingId || f.draftId) extra.push(`<label class="inline-check"><input type="checkbox" class="check" data-f="saveTpl" ${f.saveTpl ? 'checked' : ''}> Save as quick template (one tap next time)</label>
     ${f.saveTpl ? `<div class="field"><input data-f="tplName" value="${esc(f.tplName)}" placeholder="Template name, e.g. Govt vehicle fuel"></div>` : ''}`);
+  const open = !!S.settings.addMore || !!f.editingId;
+  const filled = [f.type !== 'expected' && f.date !== today() ? fmtShort(f.date) : '', showBook && book(f.bookId) ? book(f.bookId).name : '', f.note && !billMode ? 'note' : '', (f.receipt || f.receiptData) ? 'receipt' : '', f.workId && work(f.workId) ? work(f.workId).name : ''].filter(Boolean);
+  parts.push(`<button type="button" class="more-toggle" data-act="toggleAddMore" aria-expanded="${open}"><span>More details${filled.length ? ': ' + esc(filled.join(' · ')) : billMode ? ' (area)' : ' (date, area, note, receipt)'}</span><span>${open ? '▴' : '▾'}</span></button>`);
+  if (open) parts.push(`<div class="more-box">${extra.join('')}</div>`);
+  parts.push(`</div>`);
   if (f.editingId && !f.draftId) parts.push(`<button class="btn primary block" data-act="saveForm">Update</button>`);
   else parts.push(`<div class="btn-row"><button class="btn" data-act="saveNext">Save &amp; add next</button><button class="btn primary" data-act="saveForm">Save</button></div>`);
   if (f.editingId || f.linkExpected) parts.push(`<button class="btn block mt" data-act="cancelForm">Cancel</button>`);
@@ -721,7 +826,7 @@ function afterAddRender() {
 function updateAmtPreview() {
   const el = $('#amtPreview'); if (!el) return;
   const raw = String(form.amount || '');
-  if (!raw.trim()) { el.textContent = 'Tap + to add several amounts, e.g. 1200 + 350'; return; }
+  if (!raw.trim()) { el.textContent = 'Several items? Type the first, tap "+ another", type the next.'; return; }
   const v = evalAmount(raw);
   if (isNaN(v)) { el.innerHTML = '<span class="danger">Not a valid amount</span>'; return; }
   el.textContent = /[+\-*/x×]/.test(raw.replace(/^-/, '')) ? '= ' + money(v) : money(v);
@@ -760,6 +865,10 @@ function formToEntry() {
   if (has('personOpt')) e.personId = f.personId || '';
   if (has('due')) e.dueDate = f.dueDate || '';
   if (e.type === 'expected') e.direction = f.direction === 'out' ? 'out' : 'in';
+  if (e.type === 'expected' && e.direction === 'out') {
+    if (f.accountId && acc(f.accountId)) e.accountId = f.accountId;
+    if (!e.note) e.note = cat(e.categoryId)?.name || 'Bill';
+  }
   if (has('repeat')) e.repeat = REPEAT_M[f.repeat] ? f.repeat : '';
   if (f.linkExpected) e.linkExpected = f.linkExpected;
   if (e.type === 'lent' || e.type === 'received') {
@@ -830,6 +939,7 @@ async function saveForm(again = false) {
 
   if (e.linkExpected) afterExpectedPayment(e.linkExpected);
   if (e.dueDate && e.personId && person(e.personId)) person(e.personId).dueDate = e.dueDate;
+  if (e.categoryId && e.bookId) { S.settings.areaByCat = S.settings.areaByCat || {}; S.settings.areaByCat[e.categoryId] = e.bookId; }
 
   if (f.saveTpl) {
     const name = (f.tplName || '').trim() || entryTitle(e);
@@ -841,7 +951,7 @@ async function saveForm(again = false) {
   const ret = f.returnTo;
   const wasEdit = !!f.editingId && !f.draftId;
   if (again && !wasEdit) {
-    const keep = { type: f.type, direction: f.direction, dir: f.dir, kind: f.kind, later: f.later, date: f.date, paidFrom: f.paidFrom, accountId: f.accountId, bookId: f.bookId, personId: f.personId, workId: f.workId, recoverFrom: f.recoverFrom };
+    const keep = { billOnly: f.billOnly, type: f.type, direction: f.direction, dir: f.dir, kind: f.kind, later: f.later, date: f.date, paidFrom: f.paidFrom, accountId: f.accountId, bookId: f.bookId, personId: f.personId, workId: f.workId, recoverFrom: f.recoverFrom };
     resetForm(keep);
     tab = 'add'; stack = []; cur = { v: 'add', p: null };
     render(); window.scrollTo(0, 0);
@@ -852,13 +962,14 @@ async function saveForm(again = false) {
   resetForm();
   toast(wasEdit ? 'Updated' : 'Saved');
   if (ret) { tab = ret.tab; stack = ret.stack; cur = ret.cur; render(); }
+  else if (stack.length) stepBack();
   else setTab('home');
 }
 
 function cancelForm() {
   const ret = form.returnTo;
   resetForm();
-  if (ret) { tab = ret.tab; stack = ret.stack; cur = ret.cur; render(); } else setTab('home');
+  if (ret) { tab = ret.tab; stack = ret.stack; cur = ret.cur; render(); } else if (stack.length) stepBack(); else setTab('home');
 }
 
 function snapshotReturn() { return { tab, stack: [...stack], cur: { ...cur } }; }
@@ -897,15 +1008,17 @@ function afterExpectedPayment(xid) {
   // A repeating bill is settled by any payment (electricity/gas amounts vary month to month)
   if (!x.closed && (xi.rem <= 0 || (x.direction === 'out' && REPEAT_M[x.repeat]))) closeExpected(x);
 }
-const REPEAT_M = { monthly: 1, '2m': 2, '3m': 3, '6m': 6, yearly: 12 };
-const REPEAT_LBL = { monthly: 'monthly', '2m': 'every 2 months', '3m': 'every 3 months', '6m': 'every 6 months', yearly: 'yearly' };
+const REPEAT_M = { weekly: 0.25, monthly: 1, '2m': 2, '3m': 3, '6m': 6, yearly: 12 };
+const REPEAT_LBL = { weekly: 'weekly', monthly: 'monthly', '2m': 'every 2 months', '3m': 'every 3 months', '6m': 'every 6 months', yearly: 'yearly' };
+const REPEAT_OPT = [['', 'Only once'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['2m', 'Every 2 months'], ['3m', 'Every 3 months (quarterly)'], ['6m', 'Every 6 months'], ['yearly', 'Every year']];
+function nextDue(date, rep) { return rep === 'weekly' ? addDays(date, 7) : addMonths(date, REPEAT_M[rep]); }
 function closeExpected(x) {
   x.closed = true;
   if (REPEAT_M[x.repeat] && !x.spawned) {
     x.spawned = true;
     S.entries.push({
-      id: uid(), type: 'expected', amount: x.amount, date: addMonths(x.date, REPEAT_M[x.repeat]), note: x.note || '', categoryId: x.categoryId || '',
-      bookId: x.bookId || '', personId: x.personId || '', direction: x.direction, repeat: x.repeat, closed: false, spawned: false,
+      id: uid(), type: 'expected', amount: x.amount, date: nextDue(x.date, x.repeat), note: x.note || '', categoryId: x.categoryId || '',
+      bookId: x.bookId || '', accountId: x.accountId || '', personId: x.personId || '', direction: x.direction, repeat: x.repeat, closed: false, spawned: false,
       createdAt: new Date().toISOString(), history: []
     });
   }
@@ -933,12 +1046,13 @@ function pendingRec() {
   const selTotal = r2(openAll.filter(x => ui.sel.has(x.e.id)).reduce((s, x) => s + x.ri.remaining, 0));
   return `
   <div class="tiles">
-    <div class="tile"><div class="lbl">Pending to recover</div><div class="val in">${money(totalOpen)}</div><div class="sub">${openAll.length} item${openAll.length !== 1 ? 's' : ''}</div></div>
+    <div class="tile"><div class="lbl">Still to get back</div><div class="val in">${money(totalOpen)}</div><div class="sub">${openAll.length} item${openAll.length !== 1 ? 's' : ''}</div></div>
     <div class="tile"><div class="lbl">Older than ${S.settings.alertDays} days</div><div class="val ${oldN ? 'warn' : ''}">${oldN}</div><div class="sub">follow these up</div></div>
   </div>
-  <div class="two">
-    <div class="field"><select data-ui="recFilter"><option value="open" ${ui.recFilter === 'open' ? 'selected' : ''}>Open</option><option value="closed" ${ui.recFilter === 'closed' ? 'selected' : ''}>Closed</option><option value="all" ${ui.recFilter === 'all' ? 'selected' : ''}>All</option></select></div>
-    <div class="field"><select data-ui="recPerson"><option value="">Anyone</option><option value="_none" ${ui.recPerson === '_none' ? 'selected' : ''}>Not assigned</option>${S.people.map(p => `<option value="${p.id}" ${ui.recPerson === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
+  ${ageBarsHtml()}
+  <div class="stack">
+    <div class="chips" style="align-self:center">${[['open', 'Not paid yet'], ['closed', 'Paid back'], ['all', 'All']].map(([k, l]) => `<button class="chip ${ui.recFilter === k ? 'on' : ''}" data-act="recFilt" data-v="${k}">${l}</button>`).join('')}</div>
+    <div class="field"><select data-ui="recPerson" aria-label="From whom"><option value="">From: anyone</option><option value="_none" ${ui.recPerson === '_none' ? 'selected' : ''}>Not assigned</option>${S.people.map(p => `<option value="${p.id}" ${ui.recPerson === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
   </div>
   <div class="card flush">${rows.length ? rows.map(({ e, ri }) => {
     const age = daysBetween(e.date, t);
@@ -949,15 +1063,16 @@ function pendingRec() {
         <div class="li-title">${esc(entryTitle(e))}</div>
         <div class="li-sub">${fmtShort(e.date)} · ${age}d${person(e.personId) ? ' · from ' + esc(person(e.personId).name) : ''}${work(e.workId) ? ' · ' + esc(work(e.workId).name) : ''}</div>
       </button>
-      <div class="li-amt">${money(open ? ri.remaining : e.amount)}<div class="li-sub"><span class="badge ${ri.status}">${ri.status}</span>${open && ri.remaining !== e.amount ? ' of ' + money(e.amount) : ''}</div></div>
+      <div class="li-amt">${money(open ? ri.remaining : e.amount)}<div class="li-sub"><span class="badge ${ri.status}">${STATUS_LBL[ri.status] || ri.status}</span>${open && ri.remaining !== e.amount ? ' of ' + money(e.amount) : ''}</div></div>
     </div>`;
   }).join('') : '<div class="empty">Nothing here.</div>'}</div>
-  ${ui.sel.size ? `<div style="height:64px"></div><div class="sticky-bar"><button class="btn primary block" data-act="recordRecovery">Record recovery · ${ui.sel.size} selected · ${money(selTotal)}</button></div>` : '<p class="muted small mt">Tick items, then record the money you got back against them.</p>'}`;
+  ${incomeDueHtml()}
+  ${ui.sel.size ? `<div style="height:64px"></div><div class="sticky-bar"><button class="btn primary block" data-act="recordRecovery">They paid · ${ui.sel.size} selected · ${money(selTotal)}</button></div>` : '<p class="muted small mt">When money comes back, tick the items it covers and tap "They paid".</p>'}`;
 }
 
-function pendingExp() {
+function pendingExp(dirOnly) {
   const t = today();
-  let list = live().filter(e => e.type === 'expected').map(e => ({ e, xi: expectedInfo(e) }));
+  let list = live().filter(e => e.type === 'expected' && (!dirOnly || (e.direction === 'out' ? 'out' : 'in') === dirOnly)).map(e => ({ e, xi: expectedInfo(e) }));
   const open = list.filter(x => !x.xi.closed).sort((a, b) => (a.e.date < b.e.date ? -1 : 1));
   const closed = list.filter(x => x.xi.closed).sort((a, b) => (a.e.date < b.e.date ? 1 : -1));
   const inSum = r2(open.filter(x => x.e.direction !== 'out').reduce((s, x) => s + x.xi.rem, 0));
@@ -975,12 +1090,12 @@ function pendingExp() {
   };
   return `
   <div class="tiles">
-    <div class="tile"><div class="lbl">To receive</div><div class="val in">${money(inSum)}</div></div>
-    <div class="tile"><div class="lbl">To pay</div><div class="val out">${money(outSum)}</div></div>
+    <div class="tile"><div class="lbl">To receive</div><div class="val in">${money(inSum)}</div><div class="sub">TA, arrears, payouts</div></div>
+    ${dirOnly ? `<div class="tile"><div class="lbl">Open items</div><div class="val">${open.length}</div></div>` : `<div class="tile"><div class="lbl">To pay</div><div class="val out">${money(outSum)}</div></div>`}
   </div>
-  <button class="btn block" data-act="quickType" data-type="expected">+ Add upcoming payment or income</button>
+  <button class="btn primary block" data-act="quickType" data-type="expected">+ Add income due</button>
   <div class="sec-title">Open</div>
-  <div class="card flush">${open.length ? open.map(row).join('') : '<div class="empty">No open items. Add TA claims, arrears, payouts, or upcoming bills.</div>'}</div>
+  <div class="card flush">${open.length ? open.map(row).join('') : '<div class="empty">Nothing due. Add TA claims, salary arrears or online payouts you are waiting for.</div>'}</div>
   <div class="sec-title">Done <button data-act="toggleExpClosed">${ui.expShowClosed ? 'Hide' : 'Show'}</button></div>
   ${ui.expShowClosed ? `<div class="card flush">${closed.length ? closed.map(row).join('') : '<div class="empty">None.</div>'}</div>` : ''}`;
 }
@@ -993,15 +1108,16 @@ VIEWS.more = () => {
   return `<div class="card flush">
     ${item('accounts', 'Accounts & balance check', `${S.accounts.length} accounts · total ${money(Object.values(ab).reduce((a, b) => a + b, 0))}`)}
     <button class="list-item" data-act="goEntries" data-filter=""><div class="li-main"><div class="li-title">All entries</div><div class="li-sub">${live().length} entries · search and filter</div></div>›</button>
-    ${item('works', 'Works / sites', `${S.works.length} · spending per work, shareable report`)}
+    ${item('works', 'Projects / sites', `${S.works.length} · group spending by a job, site or event`)}
     ${item('templates', 'Quick templates', `${S.templates.length} saved`)}
-    ${item('books', 'Books', S.books.map(b => b.name).join(', ') || 'None')}
+    ${item('books', 'Areas', (S.books.map(b => b.name).join(', ') || 'None') + ' · split your spending')}
     ${item('cats', 'Categories', `${S.categories.length} categories`)}
   </div>
   <div class="card flush">
     ${item('backup', 'Backup & restore', S.settings.drive.connected ? (S.settings.drive.needsReconnect ? 'Google Drive: reconnect needed' : 'Google Drive auto backup on' + (S.settings.drive.lastBackup ? ' · ' + fmtDate(S.settings.drive.lastBackup.slice(0, 10)) : '')) : lb ? 'Last backup ' + fmtDate(lb.slice(0, 10)) : 'Never backed up')}
     ${item('security', 'App lock', S.settings.pinHash ? 'PIN is on' : 'Off')}
-    ${item('help', 'How it works', 'What each entry type does')}
+    <button class="list-item" data-act="toggleNum"><div class="li-main"><div class="li-title">Number style</div><div class="li-sub">${S.settings.numStyle === 'intl' ? 'International: 1,250,000' : 'Lakh: 12,50,000'} · tap to switch</div></div></button>
+    ${item('help', 'How it works', 'Plain guide to every screen')}
   </div>
   <p class="muted small mt">Data is stored only on this device${DB.ok ? '' : ' (limited storage mode)'}. Back up regularly.</p>`;
 };
@@ -1015,18 +1131,19 @@ VIEWS.accounts = () => {
   <div class="card flush">${S.accounts.map(a => `<div class="list-item">
     <div class="li-main"><div class="li-title">${esc(a.name)}</div><div class="li-sub">Opening ${money(a.opening || 0)}</div></div>
     <div class="li-amt ${(ab[a.id] || 0) < 0 ? 'danger' : ''}">${money(ab[a.id] || 0)}
-      <div><button class="btn sm" data-act="balanceCheck" data-id="${a.id}">Check</button> <button class="btn sm" data-act="editAccount" data-id="${a.id}">Edit</button></div></div>
+      <div><button class="btn sm" data-act="balanceCheck" data-id="${a.id}">Fix balance</button> <button class="btn sm" data-act="editAccount" data-id="${a.id}">Edit</button></div></div>
   </div>`).join('') || '<div class="empty">No accounts.</div>'}</div>
-  <p class="muted small mt"><b>Check</b>: enter what is actually in the wallet/bank. If it differs, one adjustment entry fixes the balance. Do this monthly.</p>`;
+  <p class="muted small mt"><b>Fix balance</b>: enter what is actually in the wallet/bank. If it differs, one adjustment entry fixes the balance. Do this monthly.</p>`;
 };
 
-function simpleList(kind, items, sub) {
+function simpleList(kind, items, sub, colored) {
   return `<button class="btn block" style="margin-bottom:12px" data-act="editSimple" data-kind="${kind}">+ Add</button>
   <div class="card flush">${items.map(x => `<button class="list-item" data-act="editSimple" data-kind="${kind}" data-id="${x.id}">
+    ${colored ? `<span class="ico" style="--c:${x.color || '#868e96'}" aria-hidden="true">${esc(x.name.trim()[0] || '•').toUpperCase()}</span>` : ''}
     <div class="li-main"><div class="li-title">${esc(x.name)}</div>${sub ? `<div class="li-sub">${sub(x)}</div>` : ''}</div>›</button>`).join('') || '<div class="empty">None yet.</div>'}</div>`;
 }
-VIEWS.books = () => simpleList('book', S.books, b => `${live().filter(e => e.bookId === b.id).length} entries`);
-VIEWS.cats = () => `<div class="sec-title">Spending</div>${simpleList('catout', S.categories.filter(c => c.kind === 'out'))}<div class="sec-title">Income</div>${simpleList('catin', S.categories.filter(c => c.kind === 'in'))}`;
+VIEWS.books = () => `<p class="muted small" style="margin:0 2px 10px">Areas split your spending so you can compare, for example Home vs Office vs Car. Categories (fuel, grocery…) say what it was; the area says what it was for.</p>` + simpleList('book', S.books, b => `${live().filter(e => e.bookId === b.id).length} entries`);
+VIEWS.cats = () => `<div class="sec-title">Spending</div>${simpleList('catout', S.categories.filter(c => c.kind === 'out' && !c.bill), null, true)}<div class="sec-title">Bill types</div>${simpleList('catbill', S.categories.filter(c => c.bill), null, true)}<div class="sec-title">Income</div>${simpleList('catin', S.categories.filter(c => c.kind === 'in'), null, true)}`;
 
 function workStats(wid) {
   const am = allocMap();
@@ -1050,7 +1167,7 @@ VIEWS.work = (wid) => {
   const st = workStats(wid);
   return `<div class="tiles">
     <div class="tile"><div class="lbl">Total spent on work</div><div class="val">${money(st.total)}</div><div class="sub">own ${money(st.own)} · recoverable ${money(st.rec)}</div></div>
-    <div class="tile"><div class="lbl">Pending to recover</div><div class="val in">${money(st.recPending)}</div><div class="sub">advances given ${money(st.adv)}</div></div>
+    <div class="tile"><div class="lbl">Still to get back</div><div class="val in">${money(st.recPending)}</div><div class="sub">advances given ${money(st.adv)}</div></div>
   </div>
   <div class="btn-row" style="margin-bottom:12px">
     <button class="btn sm" data-act="shareWork" data-p="${wid}">WhatsApp summary</button>
@@ -1099,34 +1216,46 @@ function billStats(t) {
   const due = open.filter(e => e.date <= lim);
   return { count: due.length, total: r2(due.reduce((a, e) => a + expectedInfo(e).rem, 0)), overdue: open.some(e => e.date < t) };
 }
-VIEWS.bills = () => {
+VIEWS.bills = () => billsList();
+function incomeDueHtml() {
   const t = today();
-  const items = live().filter(e => e.type === 'expected' && e.direction === 'out').map(e => ({ e, xi: expectedInfo(e) })).filter(x => !x.xi.closed)
-    .sort((a, b) => (a.e.date < b.e.date ? -1 : 1));
-  const monthly = r2(items.filter(x => REPEAT_M[x.e.repeat]).reduce((a, x) => a + x.e.amount / REPEAT_M[x.e.repeat], 0));
-  const groups = [['Overdue', x => x.e.date < t], ['Next 7 days', x => x.e.date >= t && x.e.date <= addDays(t, 7)], ['Later', x => x.e.date > addDays(t, 7)]];
-  const row = ({ e, xi }) => `<div class="list-item">
-    <button class="li-main" style="text-align:left" data-act="openEntry" data-id="${e.id}">
-      <div class="li-title">${esc(entryTitle(e))}</div>
-      <div class="li-sub ${e.date < t ? 'danger' : ''}">${fmtDate(e.date)}${REPEAT_LBL[e.repeat] ? ' · ' + REPEAT_LBL[e.repeat] : ' · once'}${book(e.bookId) ? ' · ' + esc(book(e.bookId).name) : ''}</div>
-    </button>
-    <div class="li-amt">${money(xi.rem)}<div><button class="btn sm" data-act="payExpected" data-id="${e.id}">Pay</button></div></div>
-  </div>`;
-  const body = groups.map(([name, fn]) => { const g = items.filter(fn); return g.length ? `<div class="sec-title">${name}</div><div class="card flush">${g.map(row).join('')}</div>` : ''; }).join('');
-  return `<div class="tiles">
-    <div class="tile"><div class="lbl">Due in 30 days</div><div class="val out">${money(billStats(t).total)}</div></div>
-    <div class="tile"><div class="lbl">Repeating bills</div><div class="val">${money(monthly)}</div><div class="sub">per month on average</div></div>
+  const items = live().filter(e => e.type === 'expected' && e.direction !== 'out' && !expectedInfo(e).closed).sort((a, b) => (a.date < b.date ? -1 : 1));
+  const row = e => { const od = e.date < t; return `<div class="list-item">${entryIcon(e)}
+    <button class="li-main" style="text-align:left" data-act="openEntry" data-id="${e.id}"><div class="li-title">${esc(entryTitle(e))}</div>
+    <div class="li-sub ${od ? 'danger' : ''}">${od ? 'Was due ' : 'Expected '}${fmtShort(e.date)}${REPEAT_LBL[e.repeat] ? ' · ' + REPEAT_LBL[e.repeat] : ''}</div></button>
+    <div class="li-amt in">${money(expectedInfo(e).rem)}<div><button class="btn sm" data-act="payExpected" data-id="${e.id}">Received</button></div></div></div>`; };
+  return `<div class="sec-title">Income expected <button data-act="quickType" data-type="expected">+ Add</button></div>
+  <div class="card flush">${items.length ? items.map(row).join('') : '<div class="empty small">TA claims, arrears or payouts you are waiting for. Tap "+ Add".</div>'}</div>`;
+}
+function billsList() {
+  const t = today(), filt = ui.billFilter || 'unpaid';
+  const unpaid = live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed).sort((a, b) => (a.date < b.date ? -1 : 1));
+  const billIds = new Set(S.entries.filter(e => e.type === 'expected' && e.direction === 'out').map(e => e.id));
+  const paid = live().filter(e => e.linkExpected && billIds.has(e.linkExpected) && e.type === 'expense').sort(sortDesc);
+  const st = billStats(t), overdue = unpaid.filter(e => e.date < t).length;
+  const row = e => { const od = e.date < t, d = daysBetween(t, e.date);
+    return `<div class="list-item">${entryIcon(e)}
+    <button class="li-main" style="text-align:left" data-act="openEntry" data-id="${e.id}"><div class="li-title">${esc(entryTitle(e))}</div>
+    <div class="li-sub ${od ? 'danger' : d <= 3 ? 'warn' : ''}">${od ? 'Overdue since ' + fmtShort(e.date) : d === 0 ? 'Due today' : 'Due ' + fmtShort(e.date)}${REPEAT_LBL[e.repeat] ? ' · ' + REPEAT_LBL[e.repeat] : ''}</div></button>
+    <div class="li-amt">${money(expectedInfo(e).rem)}<div><button class="btn sm" data-act="payExpected" data-id="${e.id}">Pay</button></div></div></div>`; };
+  const unpaidHtml = unpaid.length ? `<div class="card flush">${unpaid.map(row).join('')}</div>`
+    : `<div class="empty">${S.entries.some(e => e.type === 'expected' && e.direction === 'out') ? 'All bills paid ✓' : 'No bills yet. Add electricity, gas, internet, rent, or subscriptions like Netflix or ChatGPT.'}</div>`;
+  const paidHtml = paid.length ? `<div class="card flush">${paid.map(e => entryItem(e)).join('')}</div>` : '<div class="empty">No bill payments yet.</div>';
+  const counts = { unpaid: unpaid.length, paid: paid.length };
+  return `<div class="bill-sum"><span><b>${money(st.total)}</b> due in the next 30 days</span>${overdue ? `<span class="badge overdue">${overdue} overdue</span>` : ''}</div>
+  <div class="row" style="margin-bottom:12px;flex-wrap:wrap">
+    <div class="chips grow">${[['unpaid', 'Unpaid'], ['paid', 'Paid'], ['all', 'All']].map(([k, l]) => `<button class="chip ${filt === k ? 'on' : ''}" data-act="billFilt" data-v="${k}">${l}${counts[k] !== undefined ? ' ' + counts[k] : ''}</button>`).join('')}</div>
+    <button class="btn primary sm" data-act="addBill">+ Add bill</button>
   </div>
-  <button class="btn primary block" data-act="addBill">+ Add bill</button>
-  ${body || '<div class="empty">No bills yet. Add electricity, gas, water, internet, rent, or subscriptions like Netflix, ChatGPT or Claude. Set how often they repeat; tap Pay when you pay, and the next one is created automatically.</div>'}
-  <p class="muted small mt">Amount changes every month (electricity, gas)? Enter a usual amount; when you tap Pay you can type the real amount. Subscriptions charged in dollars: enter the rupee amount from your card SMS.</p>`;
-};
+  ${filt === 'unpaid' ? unpaidHtml : filt === 'paid' ? paidHtml : `<div class="sec-title">Unpaid</div>${unpaidHtml}<div class="sec-title">Paid</div>${paidHtml}`}
+  <p class="muted small mt">Bill amount changes every month? Enter the usual amount; when you tap Pay, type the real one. The next bill is created automatically.</p>`;
+}
 
 // ---------------- Insights ----------------
 function shiftYm(ym, n) { return addMonths(ym + '-01', n).slice(0, 7); }
 function catOf(e) { return e.type === 'adjustment' ? '_unrec' : (e.categoryId || '_none'); }
 function catName(id) { return id === '_unrec' ? 'Unrecorded (balance check)' : id === '_none' ? 'No category' : (cat(id)?.name || 'Deleted'); }
-function bookName(id) { return id === '_unrec' ? 'Unrecorded (balance check)' : id === '_none' ? 'No book' : (book(id)?.name || 'Deleted'); }
+function bookName(id) { return id === '_unrec' ? 'Unrecorded (balance check)' : id === '_none' ? 'No area' : (book(id)?.name || 'Deleted'); }
 function spendMonth(ym) { return ownSpending(...monthBounds(ym)); }
 function insightTeaser(t) {
   const ym = t.slice(0, 7), cur = spendMonth(ym), prev = spendMonth(shiftYm(ym, -1));
@@ -1149,8 +1278,8 @@ VIEWS.insights = () => {
     const tag = a === 0 ? (past.some(m => m.total) ? '<span class="badge partial">new</span>' : '') : v > a * 1.3 && v - a >= 500 ? `<span class="badge overdue">${Math.round((v - a) / a * 100)}% above usual</span>` : '';
     return `<button class="bar-row" style="display:block;width:100%;text-align:left" data-act="insCat" data-c="${esc(id)}">
       <div class="bar-top"><span>${esc(catName(id))} ${tag}</span><b>${money(v)}</b></div>
-      <div class="bar ${tag.includes('above') ? 'w' : ''}"><i style="width:${v / maxC * 100}%"></i></div>
-      ${a ? `<div class="muted small">usual ${money(a)} / month</div>` : ''}</button>`;
+      <div class="bar"><i style="width:${v / maxC * 100}%;background:${id.startsWith('_') ? 'var(--muted)' : catColor(id)}"></i></div>
+      ${a ? `<div class="muted small">usual ${money(Math.round(a))} / month</div>` : ''}</button>`;
   }).join('');
   const books = Object.entries(cur.byBook).sort((a, b) => b[1] - a[1]);
   const maxB = Math.max(1, ...books.map(c => c[1]));
@@ -1170,14 +1299,92 @@ VIEWS.insights = () => {
   </div>
   <div class="sec-title">By category <span class="muted" style="text-transform:none;font-weight:400">tap to see entries</span></div>
   <div class="card">${catRows || '<div class="muted small">No own spending in this month.</div>'}</div>
-  <div class="sec-title">By book</div>
+  <div class="sec-title">By area</div>
   <div class="card">${books.length ? books.map(([id, v]) => `<div class="bar-row"><div class="bar-top"><span>${esc(bookName(id))}</span><b>${money(v)}</b></div><div class="bar"><i style="width:${v / maxB * 100}%"></i></div></div>`).join('') : '<div class="muted small">Nothing yet.</div>'}</div>
   <div class="sec-title">Biggest expenses</div>
   <div class="card flush">${big.length ? big.map(e => entryItem(e)).join('') : '<div class="empty">None.</div>'}</div>
-  <div class="sec-title">Last 6 months</div>
-  <div class="card">${months.map(x => `<div class="bar-row"><div class="bar-top"><span>${monthLabel(x.m)}</span><b>${money(x.v)}</b></div><div class="bar"><i style="width:${x.v / maxM * 100}%"></i></div></div>`).join('')}</div>
-  <p class="muted small mt">Only your own money: expenses, written-off recoverables and unrecorded gaps from balance checks. Office money you will get back, loans and transfers are not counted.</p>`;
+  ${months.filter(x => x.v).length < 2 ? '' : `<div class="sec-title">Last 6 months</div>
+  <div class="card">${months.map(x => `<div class="bar-row"><div class="bar-top"><span>${monthLabel(x.m)}</span><b>${money(x.v)}</b></div><div class="bar"><i style="width:${x.v / maxM * 100}%"></i></div></div>`).join('')}</div>`}
+  ${cur.total ? '' : '<p class="muted small mt">Add a few expenses and this page shows where your money goes, by category and area, and what is above your usual.</p>'}
+  <p class="muted small mt">Only your own money: expenses, amounts you won't get back, and gaps found by Fix balance. Office money you will get back, loans and transfers are not counted.</p>`;
 };
+
+// ---------------- Welcome (first run) ----------------
+let wiz = null;
+function startWelcome() {
+  wiz = { step: 1, connect: false,
+    accounts: S.accounts.map(a => ({ id: a.id, name: a.name, bal: a.opening ? String(a.opening) : '' })),
+    books: S.books.map(b => ({ id: b.id, name: b.name, on: true })) };
+}
+function readWiz() {
+  if (!wiz) return;
+  $$('[data-wa]').forEach(inp => { const a = wiz.accounts[+inp.dataset.i]; if (a) a[inp.dataset.wa] = inp.value; });
+}
+VIEWS.welcome = () => {
+  if (!wiz) startWelcome();
+  const st = wiz.step;
+  const dots = `<div class="wdots" aria-label="Step ${st} of 4">${[1, 2, 3, 4].map(i => `<i class="${i <= st ? 'on' : ''}"></i>`).join('')}</div>`;
+  if (st === 1) return `${dots}<div class="welcome">
+    <h2>Welcome to Hisaab</h2>
+    <p class="muted">Your money, and the people it involves, in one place.</p>
+    <div class="wlist">
+      <div><span class="ico" style="--c:var(--out)">−</span><div><b>What you spend</b><br><span class="muted small">Split by area, like Home, Office or Car</span></div></div>
+      <div><span class="ico" style="--c:var(--in)">↙</span><div><b>Who owes you, and whom you owe</b><br><span class="muted small">With a clear statement to send on WhatsApp</span></div></div>
+      <div><span class="ico" style="--c:var(--move)">↻</span><div><b>Money you'll get back</b><br><span class="muted small">From your office, company or anyone</span></div></div>
+      <div><span class="ico" style="--c:var(--warn)">◷</span><div><b>Bills and payments due</b><br><span class="muted small">With reminders before the due date</span></div></div>
+    </div>
+    <p class="small muted">Everything stays on this phone. You can back it up to your own Google Drive.</p>
+    <button class="btn primary block" data-act="wNext">Set up in 2 minutes</button>
+    <button class="btn block mt" data-act="wSample">Try it with sample data first</button>
+    <div class="row" style="justify-content:center;gap:18px;margin-top:12px"><button class="link" data-act="wRestore">Restore from a backup</button><button class="link" data-act="wSkip">Skip setup</button></div></div>`;
+  if (st === 2) return `${dots}<div class="welcome">
+    <h2>Where is your money today?</h2>
+    <p class="muted small">Enter what's in each account right now. Rename, add or remove so the list matches yours. You can change this later.</p>
+    <div class="card flush">${wiz.accounts.map((a, i) => `<div class="list-item">
+      <input class="inp grow" data-wa="name" data-i="${i}" value="${esc(a.name)}" aria-label="Account name" placeholder="Account name">
+      <input class="inp" style="width:120px;text-align:right" data-wa="bal" data-i="${i}" value="${esc(a.bal)}" inputmode="decimal" placeholder="0" aria-label="Balance">
+      <button class="icon-btn" data-act="wDelAcc" data-i="${i}" aria-label="Remove">×</button></div>`).join('')}</div>
+    <button class="btn sm mt" data-act="wAddAcc">+ Add account</button>
+    <div class="btn-row mt"><button class="btn" data-act="wBack">Back</button><button class="btn primary" data-act="wNext">Next</button></div></div>`;
+  if (st === 3) return `${dots}<div class="welcome">
+    <h2>What do you spend on?</h2>
+    <p class="muted small">Areas keep spending apart so you can compare, for example Home vs Office vs Car. Tap to turn off any you don't need. Categories like fuel and grocery are already set up.</p>
+    <div class="chips">${wiz.books.map((b, i) => `<button class="chip ${b.on ? 'on' : ''}" data-act="wToggleBook" data-i="${i}">${b.on ? '✓ ' : ''}${esc(b.name)}</button>`).join('')}</div>
+    <div class="row mt"><input class="inp grow" id="wNewBook" placeholder="Add an area, e.g. Farm, Shop"><button class="btn" data-act="wAddBook">Add</button></div>
+    <div class="btn-row mt"><button class="btn" data-act="wBack">Back</button><button class="btn primary" data-act="wNext">Next</button></div></div>`;
+  return `${dots}<div class="welcome">
+    <h2>Keep a backup</h2>
+    <p class="muted small">Your entries live only on this phone. If the phone is lost or Chrome's data is cleared, they are gone unless you back up.</p>
+    ${driveClientId() ? `<div class="card"><b>Google Drive (automatic)</b><p class="muted small mt">Saves to a "Hisaab Backups" folder in your own Drive after each change. Hisaab can only see files it created.</p>
+      <button class="btn primary block mt" data-act="wFinish" data-connect="1">Finish and connect Google Drive</button></div>` : ''}
+    <div class="card"><b>Backup file</b><p class="muted small mt">Save one file to WhatsApp, email or USB, anytime from More → Backup.</p></div>
+    <div class="btn-row"><button class="btn" data-act="wBack">Back</button><button class="btn ${driveClientId() ? '' : 'primary'}" data-act="wFinish">${driveClientId() ? 'Finish, back up later' : 'Finish'}</button></div></div>`;
+};
+async function finishWelcome(connect) {
+  readWiz();
+  const used = id => S.entries.some(e => e.accountId === id || e.toAccountId === id);
+  const keep = [];
+  for (const a of wiz.accounts) {
+    const name = (a.name || '').trim(); if (!name) continue;
+    const v = String(a.bal || '').trim() === '' ? 0 : evalAmount(a.bal);
+    const opening = isNaN(v) ? 0 : v;
+    if (a.id && acc(a.id)) { Object.assign(acc(a.id), { name, opening }); keep.push(a.id); }
+    else { const id = uid(); S.accounts.push({ id, name, opening }); keep.push(id); }
+  }
+  S.accounts = S.accounts.filter(a => keep.includes(a.id) || used(a.id));
+  if (!S.accounts.length) S.accounts.push({ id: uid(), name: 'Cash', opening: 0 });
+  const usedB = id => S.entries.some(e => e.bookId === id);
+  for (const b of wiz.books) { if (b.on && !b.id) S.books.push({ id: uid(), name: b.name }); }
+  S.books = S.books.filter(b => usedB(b.id) || wiz.books.some(x => x.id === b.id && x.on) || !wiz.books.some(x => x.id === b.id));
+  S.settings.last = {};
+  S.settings.onboarded = true;
+  wiz = null;
+  await save();
+  resetForm();
+  setTab('home');
+  if (connect) driveAuth('connect', true);
+  else toast("You're set. Tap + to add your first entry");
+}
 
 VIEWS.backup = () => {
   const lb = S.settings.lastBackup;
@@ -1228,15 +1435,27 @@ VIEWS.security = () => `<div class="card">
     <button class="btn primary block" data-act="setPin">Set PIN</button>`}
   </div>`;
 
-VIEWS.help = () => `<div class="card small">
-  <p><b>Money out → For me</b>: your own spending. Only this counts in "Spent this month". Tick "Not paid yet" for a bill due later.</p><br>
-  <p><b>Money out → Gets paid back</b>: you paid, office/company/someone repays you. Stays in Pending → To get back until you record the recovery or write it off.</p><br>
-  <p><b>Money out → Give to a person</b>: loan, staff advance, or paying back what you owe. One button; the app labels it from the person's balance.</p><br>
-  <p><b>Money in → Income</b>: salary, TA, online income. Tick "Not received yet" for a claim or payout still pending.</p><br>
-  <p><b>Money in → From a person</b>: they return money, or lend you money.</p><br>
-  <p><b>Paid by a person</b>: under "Paid from", pick a staff member when they spent from your advance (or paid for you).</p><br>
-  <p><b>Before I started the app</b>: for old loans or recoverables, choose this instead of an account. The person's balance updates, your account balances don't (that money already left or arrived before you set your opening balances).</p><br>
-  <p><b>Balance check</b>: in Accounts, enter the real wallet/bank amount; the difference is saved as an adjustment so totals stay true.</p>
+VIEWS.help = () => `<div class="card small help">
+  <h4>The idea</h4>
+  <p>Hisaab separates <b>your own spending</b> from money that only passes through your hands (loans, office expenses you'll get back). That keeps "Spent this month" honest.</p>
+  <h4>Adding an entry (+)</h4>
+  <p><b>Money out → My expense</b>: grocery, fuel, anything that is your own cost.<br>
+  <b>Money out → Paid for someone</b>: you paid on behalf of your office or someone, and they will repay you. Shows under People → To get back.<br>
+  <b>Money out → Gave to someone</b>: cash handed over: a loan, a staff advance, or paying back what you owe.<br>
+  <b>Money in → Income</b>: salary, TA, online income.<br>
+  <b>Money in → Got from someone</b>: someone returns your money, or lends you some.<br>
+  <b>Transfer</b>: between your own accounts, e.g. bank to cash.</p>
+  <p>Tick <b>Not paid yet</b> / <b>Not received yet</b> for something due later. Tap <b>More details</b> for date, area, note or a receipt photo.</p>
+  <h4>Words used</h4>
+  <p><b>Account</b>: where money sits (cash, bank, Easypaisa).<br>
+  <b>Category</b>: what it was (fuel, grocery).<br>
+  <b>Area</b>: what it was for (Home, Office, Car). Optional.</p>
+  <h4>Tabs</h4>
+  <p><b>People</b>: everyone you deal with, their balance and a statement to share. <b>To get back</b> lists money you paid for office or others, plus income you're expecting (TA, payouts). When money comes, tick the items and tap They paid.<br>
+  <b>Bills</b>: Unpaid, Paid or All. Tap Pay with the real amount; repeating bills come back automatically.<br>
+  <b>Insights</b>: where your own money went this month, and what is above your usual.</p>
+  <h4>Keeping it accurate</h4>
+  <p>Once a month, More → Accounts → <b>Check</b>: type what's really in your wallet or bank; the app fixes the difference. For old loans from before you started, choose "Old amount, from before I used Hisaab" so your account balances aren't touched.</p>
 </div>`;
 
 // ---------------- Sheet (modal) ----------------
@@ -1276,7 +1495,7 @@ async function openEntry(id) {
   if (e.toAccountId) dl('To', esc(acc(e.toAccountId)?.name || '—'));
   if (e.viaPersonId) dl('Paid by', esc(person(e.viaPersonId)?.name || '—'));
   if (e.personId) dl(e.type === 'recoverable' ? 'Recover from' : 'Person', esc(person(e.personId)?.name || '—'));
-  if (e.bookId) dl('Book', esc(book(e.bookId)?.name || '—'));
+  if (e.bookId) dl('Area', esc(book(e.bookId)?.name || '—'));
   if (e.categoryId) dl('Category', esc(cat(e.categoryId)?.name || '—'));
   if (e.workId) dl('Work', esc(work(e.workId)?.name || '—'));
   if (e.dueDate) dl('Return by', fmtDate(e.dueDate));
@@ -1286,13 +1505,13 @@ async function openEntry(id) {
   let extra = '';
   if (e.type === 'recoverable' && !e.draft) {
     const ri = recInfo(e);
-    dl('Status', `<span class="badge ${ri.status}">${ri.status}</span>`);
-    dl('Recovered', money(ri.recovered));
+    dl('Status', `<span class="badge ${ri.status}">${STATUS_LBL[ri.status] || ri.status}</span>`);
+    dl('Paid back', money(ri.recovered));
     if (ri.writtenOff) dl('Written off', `${money(ri.writtenOff)} on ${fmtDate(e.writtenOff.date)}`);
     dl('Remaining', `<b>${money(ri.remaining)}</b>`);
     const recs = live().filter(x => x.type === 'recovery' && (x.allocations || []).some(a => a.id === e.id));
-    if (recs.length) extra += `<div class="sec-title">Recoveries</div><div class="card flush">${recs.map(r => { const a = r.allocations.find(a => a.id === e.id); return `<button class="list-item" data-act="openEntry" data-id="${r.id}"><div class="li-main"><div class="li-title">${fmtDate(r.date)}</div><div class="li-sub">${esc(acc(r.accountId)?.name || '')}</div></div><div class="li-amt in">${money(a.amount)}</div></button>`; }).join('')}</div>`;
-    if (ri.remaining > 0) { actions.push(`<button class="btn primary" data-act="recoverOne" data-id="${e.id}">Record recovery</button>`); actions.push(`<button class="btn" data-act="writeOff" data-id="${e.id}">Write off</button>`); }
+    if (recs.length) extra += `<div class="sec-title">Paid back so far</div><div class="card flush">${recs.map(r => { const a = r.allocations.find(a => a.id === e.id); return `<button class="list-item" data-act="openEntry" data-id="${r.id}"><div class="li-main"><div class="li-title">${fmtDate(r.date)}</div><div class="li-sub">${esc(acc(r.accountId)?.name || '')}</div></div><div class="li-amt in">${money(a.amount)}</div></button>`; }).join('')}</div>`;
+    if (ri.remaining > 0) { actions.push(`<button class="btn primary" data-act="recoverOne" data-id="${e.id}">They paid</button>`); actions.push(`<button class="btn" data-act="writeOff" data-id="${e.id}">Won't get it back</button>`); }
     if (e.writtenOff) actions.push(`<button class="btn" data-act="undoWriteOff" data-id="${e.id}">Undo write-off</button>`);
   }
   if (e.type === 'recovery') {
@@ -1361,7 +1580,7 @@ function openRecovery(ids) {
   const pid = pids.length === 1 ? pids[0] : '';
   recState = { items: items.map(x => ({ id: x.e.id, rem: x.rem, alloc: x.rem })) };
   const ab = accountBalances();
-  openSheet(`${sheetHead('Record recovery')}
+  openSheet(`${sheetHead('Money received back')}
     <div class="field"><label>Amount received</label><input id="rcAmt" inputmode="decimal" value="${total}" data-rc="amt"></div>
     <div class="two">
       <div class="field"><label>Into account</label><select id="rcAcc">${opt(S.accounts.map(a => ({ id: a.id, name: `${a.name} (${money(ab[a.id] || 0)})` })), S.settings.last.accountId || S.accounts[0]?.id)}</select></div>
@@ -1369,12 +1588,12 @@ function openRecovery(ids) {
     </div>
     <div class="field"><label>Received from (optional)</label><select id="rcPerson">${opt(S.people, pid, 'Not specified')}</select></div>
     <div class="field"><label>Note / reference</label><input id="rcNote" placeholder="e.g. Estimate no., cheque no."></div>
-    <div class="sec-title">Applied to (oldest first)</div>
+    <div class="sec-title">Which items does this pay for?</div>
     <div class="card flush" id="rcList">${items.map((x, i) => `<div class="list-item">
       <div class="li-main"><div class="li-title">${esc(entryTitle(x.e))}</div><div class="li-sub">${fmtShort(x.e.date)} · pending ${money(x.rem)}</div></div>
       <input class="inp" style="width:110px;text-align:right" inputmode="decimal" data-rc="alloc" data-i="${i}" value="${x.rem}"></div>`).join('')}</div>
     <div id="rcMsg" class="small mt"></div>
-    <button class="btn primary block mt" data-act="saveRecovery">Save recovery</button>`);
+    <button class="btn primary block mt" data-act="saveRecovery">Save</button>`);
   updateRecMsg();
 }
 let recState = null;
@@ -1419,7 +1638,7 @@ async function saveRecovery() {
   ui.sel.clear();
   await save();
   closeSheet();
-  toast('Recovery saved');
+  toast('Saved. Remaining amount updated');
   render();
 }
 
@@ -1427,10 +1646,10 @@ async function saveRecovery() {
 function openWriteOff(id) {
   const e = S.entries.find(x => x.id === id); if (!e) return;
   const ri = recInfo(e);
-  openSheet(`${sheetHead('Write off')}
-    <p style="margin-bottom:12px">Write off ${money(ri.remaining)} of "${esc(entryTitle(e))}"? It stops being pending and becomes your own spending on the date below.</p>
+  openSheet(`${sheetHead("Won't get it back")}
+    <p style="margin-bottom:12px">Write off ${money(ri.remaining)} of "${esc(entryTitle(e))}"? It stops being pending and is counted as your own spending from the date below.</p>
     <div class="field"><label>Date</label><input type="date" id="woDate" value="${today()}"></div>
-    <div class="btn-row"><button class="btn" data-act="closeSheet">Cancel</button><button class="btn danger" data-act="saveWriteOff" data-id="${id}">Write off</button></div>`);
+    <div class="btn-row"><button class="btn" data-act="closeSheet">Cancel</button><button class="btn danger" data-act="saveWriteOff" data-id="${id}">Confirm</button></div>`);
 }
 async function saveWriteOff(id) {
   const e = S.entries.find(x => x.id === id); if (!e) return;
@@ -1557,9 +1776,12 @@ async function deleteWork(id) {
 function openSimpleEditor(kind, id) {
   const arr = kind === 'book' ? S.books : S.categories;
   const x = id ? arr.find(i => i.id === id) : null;
-  const what = kind === 'book' ? 'book' : 'category';
+  const what = kind === 'book' ? 'area' : kind === 'catbill' ? 'bill type' : 'category';
+  const isCat = kind !== 'book';
+  const col = (x && x.color) || PALETTE[S.categories.length % PALETTE.length];
   openSheet(`${sheetHead((x ? 'Edit ' : 'New ') + what)}
     <div class="field"><label>Name</label><input id="sName" value="${esc(x?.name || '')}"></div>
+    ${isCat ? `<div class="field"><label>Color</label><input type="hidden" id="sColor" value="${col}"><div class="chips">${PALETTE.map(c => `<button type="button" class="swatch ${c === col ? 'on' : ''}" style="--c:${c}" data-act="pickSwatch" data-c="${c}" aria-label="Color ${c}"></button>`).join('')}</div></div>` : ''}
     <div class="btn-row">${x ? `<button class="btn danger" data-act="deleteSimple" data-kind="${kind}" data-id="${x.id}">Delete</button>` : ''}<button class="btn primary" data-act="saveSimple" data-kind="${kind}" data-id="${x?.id || ''}">Save</button></div>`);
   setTimeout(() => $('#sName')?.focus(), 50);
 }
@@ -1567,7 +1789,11 @@ async function saveSimple(kind, id) {
   const name = $('#sName').value.trim();
   if (!name) { toast('Enter a name'); return; }
   if (kind === 'book') { if (id) book(id).name = name; else S.books.push({ id: uid(), name }); }
-  else { if (id) cat(id).name = name; else S.categories.push({ id: uid(), name, kind: kind === 'catin' ? 'in' : 'out' }); }
+  else {
+    const color = $('#sColor') ? $('#sColor').value : PALETTE[0];
+    if (id) Object.assign(cat(id), { name, color });
+    else { const nid = uid(); S.categories.push({ id: nid, name, kind: kind === 'catin' ? 'in' : 'out', color, ...(kind === 'catbill' ? { bill: true } : {}) }); if (cur.v === 'add') form.categoryId = nid; }
+  }
   await save(); closeSheet(); toast('Saved'); render();
 }
 async function deleteSimple(kind, id) {
@@ -1599,7 +1825,7 @@ function personStatementText(pid) {
   const lines = personLines(pid);
   const balTxt = bal > 0 ? `Balance: you owe me ${money(bal)}` : bal < 0 ? `Balance: I owe you ${money(-bal)}` : 'Balance: settled';
   const last = lines.slice(-15);
-  const say = l => ({ 'You gave': 'I gave you', 'Advance given': 'Advance to you', 'You paid them': 'I paid you', 'They gave you': 'You gave me', 'They paid you': 'You paid me', 'Spent for me': 'You spent for me', 'Recoverable': 'To be repaid to me', 'Written off': 'Waived' }[l.label] || (l.label.startsWith('Recovered') ? 'You repaid' : l.label));
+  const say = l => ({ 'You gave': 'I gave you', 'Advance given': 'Advance to you', 'You paid them': 'I paid you', 'They gave you': 'You gave me', 'They paid you': 'You paid me', 'Spent for me': 'You spent for me', 'You paid for them': 'I paid on your behalf', 'Written off': 'Waived' }[l.label] || (l.label.startsWith('Recovered') ? 'You repaid' : l.label));
   const body = last.map(l => `${fmtShort(l.date)}: ${say(l)} ${money(Math.abs(l.v))}${l.e.note && !l.label.startsWith('Recovered') ? ' (' + l.e.note + ')' : ''}`).join('\n');
   const due = p.dueDate && bal ? `\n${bal > 0 ? 'Promised by' : 'I will pay by'} ${fmtDate(p.dueDate)}` : '';
   return `Hisaab: ${p.name}\nAs of ${fmtDate(today())}\n${balTxt.replace('Balance: ', '').replace(/^./, c => c.toUpperCase())}${due}\n\n${lines.length > 15 ? 'Last 15 of ' + lines.length + ' entries:\n' : ''}${body || 'No entries'}`;
@@ -1820,10 +2046,33 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------------- Event handling ----------------
 const ACT = {
-  tab: el => setTab(el.dataset.tab),
+  jump: el => { const t = el.dataset.tab; if (t === 'people') ui.peopleSeg = el.dataset.seg || 'people'; if (t === 'bills') ui.billFilter = 'unpaid'; jump(t); },
+  tab: el => { const t = el.dataset.tab; if (t === 'people') ui.peopleSeg = 'people'; if (t === 'bills') ui.billFilter = 'unpaid';
+    const ret = t === 'add' && cur.v !== 'add' && S.settings.onboarded ? { tab, stack: [...stack], cur: { ...cur } } : null;
+    setTab(t); if (ret && ret.cur.v !== 'home') form.returnTo = ret; },
   go: el => go(el.dataset.v, el.dataset.p || null),
   back: () => { if (stack.length) history.back(); else back(); },
-  goPending: el => { ui.pendingSeg = el.dataset.seg; setTab('pending'); },
+  goPending: el => {
+    if (el.dataset.seg === 'rec' || el.dataset.seg === 'income') { ui.peopleSeg = 'rec'; jump('people'); }
+    else { const outOverdue = live().some(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date < today()); if (outOverdue) { ui.billFilter = 'unpaid'; jump('bills'); } else { ui.peopleSeg = 'rec'; jump('people'); } }
+  },
+  peopleSeg: el => { ui.peopleSeg = el.dataset.seg; render(); },
+  billFilt: el => { ui.billFilter = el.dataset.v; render(); },
+  recFilt: el => { ui.recFilter = el.dataset.v; render(); },
+  goSearch: () => { ui.entryFilter = { month: '', type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false }; go('entries'); setTimeout(() => $('[data-ef="q"]')?.focus(), 60); },
+  pickCat: el => {
+    const id = el.dataset.id;
+    const prevName = cat(form.categoryId)?.name;
+    form.categoryId = form.categoryId === id ? '' : id;
+    if (form.type === 'expected' && form.direction === 'out' && (!form.note || form.note === prevName)) form.note = cat(form.categoryId)?.name || '';
+    const remembered = (S.settings.areaByCat || {})[form.categoryId];
+    if (form.categoryId && remembered && !form.bookTouched && book(remembered)) form.bookId = remembered;
+    render();
+  },
+  toggleAddMore: async () => { S.settings.addMore = !S.settings.addMore; await saveRaw(); render(); },
+  toggleAlerts: () => { ui.allAlerts = !ui.allAlerts; render(); },
+  toggleNum: async () => { S.settings.numStyle = S.settings.numStyle === 'intl' ? 'lakh' : 'intl'; await saveRaw(); render(); },
+  pickSwatch: el => { $('#sColor').value = el.dataset.c; $$('#sheet .swatch').forEach(b => b.classList.toggle('on', b === el)); },
   goEntries: el => {
     const f = el.dataset.filter;
     ui.entryFilter = { month: today().slice(0, 7), type: '', book: '', person: '', work: '', q: '', drafts: f === 'draft', spentOnly: f === 'spent' };
@@ -1850,7 +2099,33 @@ const ACT = {
   setField: el => { form[el.dataset.k] = el.dataset.val; if (el.dataset.k === 'direction') form.categoryId = ''; render(); },
   saveForm: () => saveForm(),
   saveNext: () => saveForm(true),
-  addBill: () => openFormWith({ type: 'expected', direction: 'out', repeat: 'monthly' }),
+  wNext: () => {
+    readWiz();
+    if (wiz.step === 2) {
+      const bad = wiz.accounts.find(a => (a.name || '').trim() && String(a.bal || '').trim() !== '' && isNaN(evalAmount(a.bal)));
+      if (bad) { toast(`"${bad.bal}" is not a valid amount for ${bad.name}`); return; }
+      if (!wiz.accounts.some(a => (a.name || '').trim())) { toast('Keep at least one account, e.g. Cash'); return; }
+    }
+    wiz.step = Math.min(4, wiz.step + 1); render(); window.scrollTo(0, 0);
+  },
+  wBack: () => { readWiz(); wiz.step = Math.max(1, wiz.step - 1); render(); },
+  wAddAcc: () => { readWiz(); wiz.accounts.push({ id: '', name: '', bal: '' }); render(); const ins = $$('[data-wa="name"]'); ins[ins.length - 1]?.focus(); },
+  wDelAcc: el => { readWiz(); wiz.accounts.splice(+el.dataset.i, 1); render(); },
+  wToggleBook: el => { const b = wiz.books[+el.dataset.i]; b.on = !b.on; render(); },
+  wAddBook: () => { const n = ($('#wNewBook').value || '').trim(); if (!n) return; wiz.books.push({ id: '', name: n, on: true }); render(); },
+  wFinish: el => finishWelcome(!!el.dataset.connect),
+  wRestore: async () => { S.settings.onboarded = true; wiz = null; await saveRaw(); setTab('more'); go('backup'); },
+  wSkip: async () => { S.settings.onboarded = true; wiz = null; await save(); setTab('home'); },
+  wSample: async () => { S = sampleState(); await DB.clear('img'); await saveRaw(); wiz = null; resetForm(); setTab('home'); toast('Sample data loaded. Tap around!'); },
+  clearSample: async () => {
+    if (!(await confirmBox('Start fresh', 'Remove all sample data and set up with your own accounts?', 'Start fresh'))) return;
+    const keep = { googleClientId: S.settings.googleClientId, numStyle: S.settings.numStyle };
+    S = defaultState(); Object.assign(S.settings, keep);
+    await DB.clear('img'); for (const k in imgCache) delete imgCache[k];
+    await saveRaw(); wiz = null; resetForm(); render(); window.scrollTo(0, 0);
+  },
+  resetSample: async () => { S = sampleState(); await DB.clear('img'); await saveRaw(); resetForm(); toast('Sample data reset'); setTab('home'); },
+  addBill: () => openFormWith({ type: 'expected', direction: 'out', repeat: 'monthly', accountId: '', billOnly: true }),
   insMove: el => { if (el.disabled) return; insMonth = shiftYm(insMonth || today().slice(0, 7), Number(el.dataset.n)); if (insMonth > today().slice(0, 7)) insMonth = today().slice(0, 7); render(); },
   insCat: el => {
     const ym = insMonth || today().slice(0, 7);
@@ -1908,7 +2183,9 @@ const ACT = {
     const x = S.entries.find(e => e.id === el.dataset.id); if (!x) return;
     const xi = expectedInfo(x);
     closeSheet();
-    openFormWith({ type: x.direction === 'out' ? 'expense' : 'income', amount: String(xi.rem), categoryId: x.categoryId || '', bookId: x.bookId || S.settings.last.bookId || '', note: x.note || '', linkExpected: x.id });
+    const pre = { type: x.direction === 'out' ? 'expense' : 'income', amount: String(xi.rem), categoryId: x.categoryId || '', bookId: x.bookId || S.settings.last.bookId || '', note: x.note || '', linkExpected: x.id };
+    if (x.accountId && acc(x.accountId)) { pre.paidFrom = 'a:' + x.accountId; pre.accountId = x.accountId; }
+    openFormWith(pre);
   },
   closeExp: async el => { const x = S.entries.find(e => e.id === el.dataset.id); if (!x) return; closeExpected(x); await save(); closeSheet(); toast('Marked done'); render(); },
   reopenExp: async el => { const x = S.entries.find(e => e.id === el.dataset.id); if (!x) return; x.closed = false; await save(); closeSheet(); render(); },
@@ -1980,6 +2257,7 @@ document.addEventListener('input', e => {
     const k = t.dataset.f;
     form[k] = t.type === 'checkbox' ? t.checked : t.value;
     if (k === 'amount') updateAmtPreview();
+    if (k === 'bookId') form.bookTouched = true;
     if (k === 'personId' && form.type === 'lent') { render(); return; }
     if (k === 'saveTpl') render();
     return;
@@ -2226,7 +2504,7 @@ function scheduleUpload() {
 // when the 1-hour Google token has expired, does a quick silent sign-in redirect.
 function maybeAutoSync() {
   const d = S.settings.drive;
-  if (!d.connected || !d.auto || !driveClientId() || !S.settings.driveDirty) return;
+  if (!d.connected || !d.auto || !driveClientId() || !S.settings.driveDirty || S.settings.sample) return;
   if (tokenValid()) { scheduleUpload(); return; }
   if (d.needsReconnect || !navigator.onLine) return;
   if (!$('#lock').hidden) { pendingAutoSync = true; return; }
