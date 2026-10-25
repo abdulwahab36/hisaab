@@ -20,25 +20,35 @@ Opening index.html directly as a file also works for testing, but offline instal
 ## First 5 minutes
 On first open, Hisaab shows a short welcome: enter your account balances and pick your areas (Home, Office…), or try it with sample data first. The steps below are for later changes.
 
-1. More > Accounts: set the opening balance of Cash, Bank, Easypaisa, JazzCash (edit names/add more).
+1. ☰ > Accounts: set the opening balance of Cash, Bank, Easypaisa, JazzCash (edit names/add more).
 2. People: add friends, staff, and your office/company as a person (type "Office / company").
-3. More > Works / sites: add works you spend on (optional).
+3. ☰ > Projects / sites: add works you spend on (optional).
 4. Add entries with the + button. Tick "Save as quick template" for anything you repeat.
-5. More > Backup: back up weekly (share the file to Google Drive or WhatsApp yourself).
+5. ☰ > Backup: back up weekly (share the file to Google Drive or WhatsApp yourself).
 
 ## Entry types
 - My expense: your own spending. Only this (plus write-offs and balance-check gaps) counts as "Spent".
-- Paid for someone: you paid, office/company/someone repays you later. Stays in Pending until recovered or written off.
+- Paid for someone: you paid, office/company/someone repays you later. Shows under "To get back" on that person's page until paid back or written off.
 - Paid from a person: on Expense/Recoverable, pick a staff member under "Paid from" when they spend from your advance (or pay for you).
 - Advance / Got back: money given to staff, and unused cash returned.
-- Lent / Borrowed / Got back / Paid back: loans with people.
-- Bills: pick a bill type (Electricity, Gas, Water, Internet, Mobile, Rent, Subscription, Other), name it (LESCO, Netflix), set how often (weekly to yearly) and the account you usually pay from. Tap Pay with the real amount; the next one is created automatically.
-- Insights (Home > Insights): own spending by category and book, categories above your usual, biggest expenses, last 6 months.
+- Loans and advances: open the person in People and tap I gave or I received. The app labels it (loan, advance, paying back) from their balance. Settle up fills in the exact amount to clear the balance.
+- Bills: pick a bill type from the grid (Electricity, Gas, Water, Internet, Mobile, Rent, School fee, Committee…), name it (LESCO, Netflix), set how often (weekly to yearly) and the account you usually pay from. Tap Pay with the real amount; the next one is created automatically.
+- Bottom bar: Home, People, +, Bills, Insights. On Home, the top row has ☰ (menu with backup status, Budgets, Accounts, Backup, Preferences and other settings), the period switcher, and 🔥 (recording streak). "See full breakdown" under the Home summary opens Insights for the same period.
+- Home: spending for this week, last week, this month, a past month or custom dates (tap the period name). Cash and bank totals are under ☰ > Accounts.
+- Insights: own spending by category and area, categories above your usual, biggest expenses, last 6 months.
+- Budgets (☰ > Budgets): a monthly limit for all spending, and optional limits per category or area. The marker on each bar shows how far through the month you are. Home shows the overall budget; Needs attention warns at 90% and when over.
+- Streak (🔥 on Home, top right): days in a row with something recorded. Tap "Nothing spent today" on days without spending. Hollow dots are missed days: tap one to add that day's spending or mark it as nothing spent.
+- ☰ > Preferences: appearance (same as phone, light, dark), text size, currency symbol, number style.
+- Home-screen shortcuts: long-press the installed Hisaab icon for Add expense, Bills and People.
+- After saving, tap Undo in the message at the bottom within 5 seconds to take it back.
+
+## Files
+index.html, style.css, app.js, config.js, sw.js, manifest.json (includes the home-screen shortcuts), icons, and the fonts folder (3 small font files, needed for the look and offline use).
 
 ## Google Drive auto backup
 One-time setup (about 15 minutes, free): see SETUP-GOOGLE-DRIVE.md.
 After that the app saves to your Drive folder "Hisaab Backups" after every change. Your Google sign-in lasts 1 hour; after that the app briefly jumps to Google and back (about a second) to refresh it. The last 15 days are kept. Receipt photos are saved in Hisaab Backups/receipts.
-New phone: install the app, More > Backup > Restore from Google Drive.
+New phone: install the app, ☰ > Backup > Restore from Google Drive.
 
 ## APK
 See GET-APK.md (free, via PWABuilder). Not required: installing from Chrome gives the same app.
