@@ -634,3 +634,28 @@ body.roottab:not(.nohead) main { padding-top: 46px; }
 .ha ol { margin: 0 0 8px 18px; }
 .ha li { margin-bottom: 4px; }
 .ha .ex { padding: 8px 10px; border-radius: 10px; background: var(--bg); color: var(--muted); font-size: 13px; }
+
+/* ===== v30: simple form ===== */
+.forlink { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 10px 12px; margin: 2px 0 12px; border-radius: 12px; border: 1px dashed var(--line); color: var(--muted); font-size: 14px; text-align: left; }
+.forlink span { font-size: 18px; }
+.datebox { position: relative; display: flex; align-items: center; justify-content: space-between; padding: 11px 12px; border-radius: 11px; background: var(--surface); font-size: 15px; font-weight: 500; color: var(--text) !important; margin: 0 !important; }
+.datebox svg { width: 18px; height: 18px; color: var(--muted); }
+.datebox input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.field .datebox { display: flex; font-size: 15px; font-weight: 500; }
+
+/* ===== v31 ===== */
+.kindchips { gap: 6px; }
+.quickrow { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 4px; }
+.quickrow::-webkit-scrollbar { display: none; }
+.quickrow .chip { flex-shrink: 0; }
+.quickrow .chip .muted { font-weight: 400; margin-left: 2px; }
+.ins3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.ins3 > div { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-radius: 14px; background: var(--surface); min-width: 0; }
+.ins3 span { font-size: 12.5px; color: var(--muted); }
+.ins3 b { font-size: 16px; font-weight: 700; word-break: break-word; }
+.ins3 small { font-size: 11.5px; color: var(--muted); }
+.pace { font-size: 14px; line-height: 1.5; margin: 0 2px 12px; color: var(--muted); }
+.pace b { color: var(--text); }
+
+.arealine { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.arealine select { flex: 1; min-width: 0; padding: 9px 12px; font-size: 14px; }

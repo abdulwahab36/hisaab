@@ -1,6 +1,6 @@
 # Hisaab
 
-Personal money tracker: own spending, recoverables, people ledgers, staff advances, expected money.
+Personal money tracker: own spending, recoverables, people ledgers, money given to others to spend for you, expected money.
 Runs fully on your phone. No server, no account, no Play Store needed.
 
 ## Install on your phone (free)
@@ -21,29 +21,24 @@ Opening index.html directly as a file also works for testing, but offline instal
 On first open, Hisaab shows a short welcome: enter your account balances and pick your areas (Home, Office…), or try it with sample data first. The steps below are for later changes.
 
 1. ☰ > Accounts: set the opening balance of Cash, Bank, Easypaisa, JazzCash (edit names/add more).
-2. People: add friends, staff, and your office/company as a person (type "Office / company").
+2. People: add family, friends, people who spend money for you, and your office/company (type "Office / company (pays me back)").
 3. ☰ > Projects / sites: add works you spend on (optional).
 4. Add entries with the + button. Tick "Save as quick template" for anything you repeat.
 5. ☰ > Backup: back up weekly (share the file to Google Drive or WhatsApp yourself).
 
-## Adding money: who and what
-Tap + and choose Money out or Money in.
-- Money out > For whom? Pick Me (your own spending) or a person, then answer What is this money?
-  - Not coming back: a gift, a treat, or a fee you paid for them. Counts as your spending; Insights > Spent on people shows the total.
-  - Coming back: they will return it, or the office will reimburse you.
-  - To spend for me: they buy something for you and give back the change. When they tell you what they spent, open their page > They paid a bill or bought something for me.
-  - Paying back what I owe: shown only when you owe that person.
-- Money in > From whom? Pick Income (salary, TA) or a person, then Paying me back or Lending me.
-- Paid from lists your accounts, plus anyone holding money you gave them to spend for you. Choose "Someone else paid for me…" when a friend or relative paid (you will owe them).
-- Date: Today, Yesterday or Other date, right under the amount.
-- Paying a bill? When a bill is due within a week, it appears under the category; tap it to fill the amount and mark the bill paid.
-- Money in from someone with open items (for example the office): "Paying back items" lets you choose which items the money covers, so each one closes.
+## Adding money
+- Everyday (most entries): + > amount > category > Save. Paid from and Date (shows Today) are right there if you need to change them.
+- For family, friends or the office: tap "For someone else?" under the amount, or open the person in People and tap "I gave / paid" or "I received". Then choose what the money is:
+  - Money out: Not coming back (gift, treat, fee you paid for them) · Coming back (loan, or office will reimburse) · To spend for me (they buy things for you and return the change) · Paying back what I owe.
+  - Money in: Paying back items · Paying me back / Returning unused money · Lending me · Paid something for me (you will owe them).
+- The most likely choice is already selected: family = Not coming back, office = Coming back, spends money for me = To spend for me, friend = Coming back, anyone you owe = Paying back.
+- Settle up on a person's page fills the exact amount and uses the same steps.
 
 ## Entry types
 - My expense: your own spending. Only this (plus write-offs and balance-check gaps) counts as "Spent".
 - To get back (For: a person, pay back Yes): you paid, office/company/someone repays you later. Shows under "To get back" on that person's page until paid back or written off.
-- Paid from a person: on Expense/Recoverable, pick a staff member under "Paid from" when they spend from your advance (or pay for you).
-- Advance / Got back: money given to staff, and unused cash returned.
+- Paid from a person: on Expense/Recoverable, pick that person under "Paid from" when they spend from your advance (or pay for you).
+- Advance / Got back: money given to someone to spend for you, and unused cash returned.
 - Loans and advances: open the person in People and tap I gave or I received. The app labels it (loan, advance, paying back) from their balance. Settle up fills in the exact amount to clear the balance.
 - Bills: pick a bill type from the grid (Electricity, Gas, Water, Internet, Mobile, Rent, School fee, Committee…), name it (LESCO, Netflix), set how often (weekly to yearly) and the account you usually pay from. Tap Pay with the real amount; the next one is created automatically.
 - Bottom bar: Home, People, +, Bills, Insights. On Home, the top row has ☰ (menu with backup status, Budgets, Accounts, Backup, Preferences and other settings), the period switcher, and 🔥 (recording streak). "See full breakdown" under the Home summary opens Insights for the same period.
@@ -54,6 +49,14 @@ Tap + and choose Money out or Money in.
 - ☰ > Preferences: appearance (same as phone, light, dark), text size, currency symbol, number style.
 - Home-screen shortcuts: long-press the installed Hisaab icon for Add expense, Bills and People.
 - After saving, tap Undo in the message at the bottom within 5 seconds to take it back.
+
+## Home and Insights
+- Home > Add again: the things you enter most often (fuel, milk…) appear automatically. One tap opens the form already filled; change the amount if needed and Save.
+- Insights: Income, Spent and Saved for the month; your daily average and where the month will end at this pace; budget; categories and areas; Spent on people; how you paid (cash, bank, paid by others); bills paid and still to pay; money with people; biggest expenses; months side by side.
+- Adding a person: choose who they are (Family / relative, Friend, Spends money for me, Office / company (pays me back), Other). The short explanation under the choice shows what it means; it decides which option is pre-selected when you add money for them.
+
+## Area
+- The Area line sits under the category on the add form. It fills itself from the category (Fuel → where you usually put fuel), never from your last entry, so one area can't silently leak into the next record. Change it in one tap; a hand-picked area is kept for "Save and add another".
 
 ## Help inside the app
 ☰ > How to use Hisaab: every task explained in plain steps with examples, with a search box.
