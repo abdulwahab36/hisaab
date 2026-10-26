@@ -26,9 +26,22 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 4. Add entries with the + button. Tick "Save as quick template" for anything you repeat.
 5. ☰ > Backup: back up weekly (share the file to Google Drive or WhatsApp yourself).
 
+## Adding money: who and what
+Tap + and choose Money out or Money in.
+- Money out > For whom? Pick Me (your own spending) or a person, then answer What is this money?
+  - Not coming back: a gift, a treat, or a fee you paid for them. Counts as your spending; Insights > Spent on people shows the total.
+  - Coming back: they will return it, or the office will reimburse you.
+  - To spend for me: they buy something for you and give back the change. When they tell you what they spent, open their page > They paid a bill or bought something for me.
+  - Paying back what I owe: shown only when you owe that person.
+- Money in > From whom? Pick Income (salary, TA) or a person, then Paying me back or Lending me.
+- Paid from lists your accounts, plus anyone holding money you gave them to spend for you. Choose "Someone else paid for me…" when a friend or relative paid (you will owe them).
+- Date: Today, Yesterday or Other date, right under the amount.
+- Paying a bill? When a bill is due within a week, it appears under the category; tap it to fill the amount and mark the bill paid.
+- Money in from someone with open items (for example the office): "Paying back items" lets you choose which items the money covers, so each one closes.
+
 ## Entry types
 - My expense: your own spending. Only this (plus write-offs and balance-check gaps) counts as "Spent".
-- Paid for someone: you paid, office/company/someone repays you later. Shows under "To get back" on that person's page until paid back or written off.
+- To get back (For: a person, pay back Yes): you paid, office/company/someone repays you later. Shows under "To get back" on that person's page until paid back or written off.
 - Paid from a person: on Expense/Recoverable, pick a staff member under "Paid from" when they spend from your advance (or pay for you).
 - Advance / Got back: money given to staff, and unused cash returned.
 - Loans and advances: open the person in People and tap I gave or I received. The app labels it (loan, advance, paying back) from their balance. Settle up fills in the exact amount to clear the balance.
@@ -41,6 +54,9 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - ☰ > Preferences: appearance (same as phone, light, dark), text size, currency symbol, number style.
 - Home-screen shortcuts: long-press the installed Hisaab icon for Add expense, Bills and People.
 - After saving, tap Undo in the message at the bottom within 5 seconds to take it back.
+
+## Help inside the app
+☰ > How to use Hisaab: every task explained in plain steps with examples, with a search box.
 
 ## Files
 index.html, style.css, app.js, config.js, sw.js, manifest.json (includes the home-screen shortcuts), icons, and the fonts folder (3 small font files, needed for the look and offline use).
