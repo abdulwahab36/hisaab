@@ -434,6 +434,14 @@ function entrySub(e) {
 const STATUS_LBL = { pending: 'not back yet', partial: 'part back', recovered: 'paid back', 'written-off': 'written off' };
 const TYPE_ICO = { lent: '↗', advance: '↗', repaid: '↗', received: '↙', borrowed: '↙', transfer: '⇄', recovery: '↩', adjustment: '=', income: '+', expense: '•', recoverable: '↻', expected: '◷' };
 const ICON_PATHS = {
+  pie: 'M21 12A9 9 0 1 1 12 3v9zM15 3.5A9 9 0 0 1 20.5 9H15z',
+  list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
+  folder: 'M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z',
+  grid: 'M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM13.5 13.5H20V20h-6.5z',
+  tag: 'M3 12.2V4.5A1.5 1.5 0 0 1 4.5 3h7.7l8.8 8.8-9.2 9.2zM7.5 7.5h.01',
+  gear: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19.4 15l1.6 1-2 3.4-1.8-.7a7 7 0 0 1-2.2 1.3l-.3 1.9h-4l-.3-1.9a7 7 0 0 1-2.2-1.3l-1.8.7-2-3.4 1.5-1.2a7 7 0 0 1 0-2.6L3 11.8l2-3.4 1.8.7A7 7 0 0 1 9 7.8l.3-1.9h4l.3 1.9a7 7 0 0 1 2.2 1.3l1.8-.7 2 3.4-1.6 1.2a7 7 0 0 1 0 2.6z',
+  help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.3 9.2a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.4-2.7 3.8M12 17h.01',
+  zap: 'M13 3 4 14h7l-1 7 9-11h-7z',
   pencil: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
   basket: 'M5 10h14l-1.6 9H6.6z M8.5 10L12 4.5 15.5 10',
   fork: 'M7 3v18 M4.5 3v5a2.5 2.5 0 0 0 5 0V3 M17 21V3c-2.2 1.2-3.5 4-3.5 7.5H17',
@@ -582,7 +590,7 @@ function render() {
   let title = TITLES[cur.v] || 'Hisaab';
   if (cur.v === 'person') title = '';
   if (cur.v === 'pending') title = ui.pendingSeg === 'exp' ? 'Upcoming' : 'To get back';
-  if (cur.v === 'work') title = work(cur.p)?.name || 'Project';
+  if (cur.v === 'work') title = '';
   if (cur.v === 'bill') { const b = billSeries(cur.p).at(-1); title = b ? entryTitle(b) : 'Bill'; }
   if (cur.v === 'add' && form.editingId) title = form.draftId ? 'Complete entry' : 'Edit entry';
   if (cur.v === 'add' && form.type === 'expected' && form.direction === 'out') title = form.editingId ? 'Edit bill' : 'Add bill';
@@ -870,8 +878,8 @@ VIEWS.person = (pid) => {
   return `
   <div class="phero">
     ${personAvatar(p).replace('ico av', 'ico av lg')}
-    <div class="grow"><h2>${esc(p.name)}</h2><div class="muted small">${esc(PERSON_KINDS[p.kind] || '')}${p.phone ? ' · ' + esc(p.phone) : ''}</div></div>
-    <div class="phead-acts">${lines.length ? `<button class="link small" data-act="sharePerson" data-p="${pid}">Share</button>` : ''}<button class="link small" data-act="editPerson" data-id="${pid}">Edit</button></div>
+    <div class="grow"><h2>${esc(p.name)}</h2><div class="muted small">${esc(PERSON_KINDS[p.kind] || '')}${p.phone ? ' · ' + esc(p.phone) : ''}</div>
+      <div class="hlinks"><button class="link" data-act="editPerson" data-id="${pid}">Edit</button>${lines.length ? `<span>·</span><button class="link" data-act="sharePerson" data-p="${pid}">Share</button>` : ''}${p.phone ? `<span>·</span><a class="link" href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">Call</a>` : ''}</div></div>
   </div>
   <div class="pbal">${balLine}</div>
   ${(() => { const ym = today().slice(0, 7), m = spentOnTotals(ym + '-01', ym + '-31')[pid] || 0, y = spentOnTotals(ym.slice(0, 4) + '-01-01', ym.slice(0, 4) + '-12-31')[pid] || 0;
@@ -980,6 +988,7 @@ function areaForCat(cid) {
   return r && book(r) ? r : '';
 }
 function resetForm(over = {}) {
+  if (typeof ui !== 'undefined') ui.allCats = false;
   const L = S.settings.last || {};
   const u = uiFromType(over.type || 'expense', over.direction);
   form = {
@@ -1072,7 +1081,15 @@ VIEWS.add = () => {
   if (showCat && billMode) {
     const have = new Set(cats.map(c => c.name.toLowerCase()));
     parts.push(`<div class="field"><label>Bill type</label><div class="tgrid">${cats.map(c => `<button type="button" class="tile2 cat ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}">${svgIcon(catIcon(c.name))}<span>${esc(c.name)}</span></button>`).join('')}${BILL_SUG.filter(n => !have.has(n.toLowerCase())).map(n => `<button type="button" class="tile2" data-act="pickBillSug" data-name="${n}">${svgIcon(catIcon(n))}<span>${n}</span></button>`).join('')}<button type="button" class="tile2 ghost" data-act="editSimple" data-kind="catbill" data-fromform="1">${svgIcon('plus')}<span>Other…</span></button></div></div>`);
-  } else if (showCat) parts.push(`<div class="field"><label>Category</label><div class="chips">${cats.map(c => `<button type="button" class="chip cat ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}">${svgIcon(catIcon(c.name))}${esc(c.name)}</button>`).join('')}<button type="button" class="chip ghost" data-act="editSimple" data-kind="${catKind === 'in' ? 'catin' : 'catout'}" data-fromform="1">+ New</button></div></div>`);
+  } else if (showCat) {
+    // Most used first, left to right; the rest one tap away (fewer choices to scan)
+    const TOPN = 6, all = ui.allCats || cats.length <= TOPN + 1;
+    let shown = all ? cats : cats.slice(0, TOPN);
+    if (!all && f.categoryId && !shown.some(c => c.id === f.categoryId)) { const sel = cats.find(c => c.id === f.categoryId); if (sel) shown = [...shown.slice(0, TOPN - 1), sel]; }
+    const chip = c => `<button type="button" class="chip cat ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}">${svgIcon(catIcon(c.name))}${esc(c.name)}</button>`;
+    parts.push(`<div class="field"><label class="lblrow"><span>Category</span>${cats.length > TOPN + 1 ? `<button type="button" class="link small" data-act="allCats">${all ? 'Show less' : `All ${cats.length} ›`}</button>` : ''}</label>
+      <div class="chips">${shown.map(chip).join('')}${all ? `<button type="button" class="chip ghost" data-act="editSimple" data-kind="${catKind === 'in' ? 'catin' : 'catout'}" data-fromform="1">+ New</button>` : `<button type="button" class="chip ghost" data-act="allCats">More…</button>`}</div></div>`);
+  }
   if (showBook && S.books.length) parts.push(`<label class="arealine"><span>Area</span><select class="inp" data-f="bookId" aria-label="Area">${opt(S.books, f.bookId, 'None')}</select></label>`);
   // Project: its own visible line once you have an open project (always starts at None, never copied from the last entry)
   const openWorks = S.works.filter(w => !w.closed || w.id === f.workId);
@@ -1460,13 +1477,37 @@ function pendingExp(dirOnly) {
 // ---------------- More & sub-views ----------------
 let menuOpen = false;
 function openMenu() {
-  const d = S.settings.drive;
+  const d = S.settings.drive, ym = today().slice(0, 7);
+  const bad = d.connected && d.needsReconnect, off = !d.connected;
   const status = d.connected
-    ? `<b>${esc(d.email || 'Google Drive')}</b><span>${d.needsReconnect ? '<span class="danger">Backup paused · tap to reconnect</span>' : d.lastBackup ? 'Backed up ' + fmtShort(d.lastBackup.slice(0, 10)) + ' ' + new Date(d.lastBackup).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'Backup on'}</span>`
+    ? `<b>${esc(d.email || 'Google Drive')}</b><span>${bad ? 'Backup paused · tap to reconnect' : d.lastBackup ? 'Backed up ' + fmtShort(d.lastBackup.slice(0, 10)) + ', ' + new Date(d.lastBackup).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'Backup on'}</span>`
     : `<b>Backup not set up</b><span>${S.settings.lastBackup ? 'Last file backup ' + fmtShort(S.settings.lastBackup.slice(0, 10)) : 'Your data is only on this phone'}</span>`;
-  $('#menuPanel').innerHTML = `<div class="dr-head"><div class="dr-app">Hisaab</div>
-    <button class="dr-acct" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span></button></div>
-    ${VIEWS.more()}`;
+  const bt = budgetRows(ym).rows.find(x => x.k === 'total');
+  const ab = accountBalances(), cash = r2(Object.values(ab).reduce((a, b) => a + b, 0));
+  const here = v => (cur.v === v ? ' on' : '');
+  const it = (v, icon, label, meta, act) => `<button class="dr-item${here(v)}" ${act || `data-act="go" data-v="${v}"`}>${svgIcon(icon)}<span class="dr-l">${label}</span>${meta !== '' && meta != null ? `<span class="dr-m">${meta}</span>` : ''}</button>`;
+  $('#menuPanel').innerHTML = `<div class="dr-head">
+      <div class="dr-brand"><img src="icon.svg?v=37" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
+      <button class="dr-acct ${bad || off ? 'warn' : ''}" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span>${bad || off ? '<span class="dr-dot"></span>' : ''}</button>
+    </div>
+    <nav class="dr-nav" aria-label="Menu">
+      <div class="dr-sec">Money</div>
+      ${it('budgets', 'pie', 'Budgets', bt ? (bt.left >= 0 ? shortMoney(bt.left) + ' left' : '<span class="danger">' + shortMoney(-bt.left) + ' over</span>') : 'Set up')}
+      ${it('accounts', 'wallet', 'Accounts', shortMoney(cash))}
+      ${it('entries', 'list', 'All entries', live().length, 'data-act="goEntries" data-filter=""')}
+      <div class="dr-sep"></div><div class="dr-sec">Organise</div>
+      ${it('works', 'folder', 'Projects', S.works.filter(w => !w.closed).length || '')}
+      ${it('books', 'grid', 'Areas', S.books.length)}
+      ${it('cats', 'tag', 'Categories', S.categories.length)}
+      ${it('templates', 'zap', 'Quick templates', S.templates.length || '')}
+      <div class="dr-sep"></div><div class="dr-sec">App</div>
+      ${it('backup', 'cloud', 'Backup & restore', bad ? '<span class="danger">Paused</span>' : d.connected ? 'On' : '<span class="warn">Off</span>')}
+      ${it('security', 'shield', 'App lock', S.settings.pinHash ? 'On' : 'Off')}
+      ${S.settings.pinHash ? it('lockNow', 'lock', 'Lock now', '', 'data-act="lockNow"') : ''}
+      ${it('prefs', 'gear', 'Preferences', '')}
+      ${it('help', 'help', 'How to use', '')}
+    </nav>
+    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v37</p>`;
   $('#menu').hidden = false; menuOpen = true; pushHist();
   requestAnimationFrame(() => $('#menu').classList.add('open'));
 }
@@ -1611,49 +1652,80 @@ function workStats(wid) {
   }
   return { own, rec, recPending, adv, viaStaff, total: r2(own + rec), entries };
 }
-VIEWS.works = () => `<div class="iv-body">${ivProjects(today().slice(0, 7))}</div>`;
+VIEWS.works = () => {
+  const q = (ui.projQ || '').trim().toLowerCase(), pf = ui.projF || 'open', ym = today().slice(0, 7);
+  const rows = S.works.map(w => ({ w, st: workStats(w.id) }));
+  const nOpen = rows.filter(r => !r.w.closed).length, nDone = rows.length - nOpen;
+  const list = rows.filter(r => pf === 'all' || (pf === 'open' ? !r.w.closed : r.w.closed)).filter(r => !q || (r.w.name + ' ' + (r.w.ref || '')).toLowerCase().includes(q))
+    .sort((a, b) => { const la = a.st.entries.reduce((x, e) => (e.date > x ? e.date : x), ''), lb = b.st.entries.reduce((x, e) => (e.date > x ? e.date : x), ''); return (lb > la ? 1 : lb < la ? -1 : 0) || a.w.name.localeCompare(b.w.name); });
+  const openRows = rows.filter(r => !r.w.closed), tot = r2(openRows.reduce((a, r) => a + r.st.total, 0)), pend = r2(openRows.reduce((a, r) => a + r.st.recPending, 0));
+  return `
+  <div class="chips" style="margin-bottom:8px">${[['open', 'Open', nOpen], ['done', 'Finished', nDone], ['all', 'All', rows.length]].map(([k, l, n]) => `<button class="chip ${pf === k ? 'on' : ''}" data-act="projF" data-v="${k}">${l} (${n})</button>`).join('')}</div>
+  <div class="psum">Spent on open projects <b>${money(tot)}</b>${pend ? ` · To get back <b class="in">${money(pend)}</b>` : ''}</div>
+  <div class="row" style="margin-bottom:10px">
+    <input class="inp grow" placeholder="Search projects" value="${esc(ui.projQ || '')}" data-ui="projQ">
+    <button class="btn primary" data-act="editWork">+ Project</button>
+  </div>
+  <div class="list">${list.length ? list.map(({ w, st }) => `<button class="list-item" data-act="go" data-v="work" data-p="${w.id}">
+      <span class="ico av" aria-hidden="true">${esc((w.name.trim()[0] || '?').toUpperCase())}</span>
+      <div class="li-main"><div class="li-title">${esc(w.name)}</div></div>
+      <div class="li-amt">${money(st.total)}</div><span class="chev" aria-hidden="true">›</span></button>`).join('')
+    : `<div class="empty">${q ? 'No match.' : pf === 'done' ? 'No finished projects.' : 'No projects yet. Tap + Project to group the costs of one job, site or event.'}</div>`}</div>`;
+};
 
 VIEWS.work = (wid) => {
   const w = work(wid);
   if (!w) return '<div class="empty">Not found.</div>';
-  const st = workStats(wid), ents = [...st.entries].sort(sortDesc);
+  const st = workStats(wid), ym = today().slice(0, 7), [f, to] = monthBounds(ym);
   const withPeople = Math.max(0, r2(st.adv - st.viaStaff));
   const ownPct = st.total ? st.own / st.total * 100 : 0;
-  // categories on this project (donut + list, like Insights)
+  const month = r2(st.entries.filter(e => (e.type === 'expense' || e.type === 'recoverable') && e.date >= f && e.date <= to).reduce((a, e) => a + e.amount, 0));
+  const budget = Number(w.budget) || 0, used = budget ? st.total / budget : 0;
   const byCat = {};
   for (const e of st.entries) if (e.type === 'expense' || e.type === 'recoverable') byCat[e.categoryId || '_none'] = r2((byCat[e.categoryId || '_none'] || 0) + e.amount);
   const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
   const top = cats.slice(0, cats.length > IV_SLOTS + 1 ? IV_SLOTS : IV_SLOTS + 1), rest = cats.slice(top.length), restV = r2(rest.reduce((a, c) => a + c[1], 0));
   const slices = top.map(([id, v], i) => ({ id, v, name: catName(id), color: id.startsWith('_') ? 'var(--c-other)' : `var(--c${(i % IV_SLOTS) + 1})` }));
   if (restV) slices.push({ id: '_rest', v: restV, name: rest.length + ' more', color: 'var(--c-other)' });
-  // spending by month on this project
   const byM = {}; for (const e of st.entries) if (e.type === 'expense' || e.type === 'recoverable') byM[e.date.slice(0, 7)] = r2((byM[e.date.slice(0, 7)] || 0) + e.amount);
-  const ms = Object.keys(byM).sort(), months = ms.length ? (() => { const out = []; for (let m = ms[0]; m <= ms[ms.length - 1] && out.length < 12; m = shiftYm(m, 1)) out.push({ m, v: byM[m] || 0 }); return out.slice(-12); })() : [];
-  const last = ents.length ? ents[0].date : '';
+  const ms = Object.keys(byM).sort(), months = ms.length ? (() => { const out = []; for (let m = ms[0]; m <= ms[ms.length - 1]; m = shiftYm(m, 1)) out.push({ m, v: byM[m] || 0 }); return out.slice(-12); })() : [];
+  const pjf = ui.pjF || 'all';
+  const FIL = { all: () => true, own: e => e.type === 'expense', rec: e => e.type === 'recoverable', given: e => ['advance', 'lent', 'received', 'recovery'].includes(e.type) };
+  const ents = [...st.entries].filter(FIL[pjf] || FIL.all).sort(sortDesc);
+  const counts = Object.fromEntries(Object.keys(FIL).map(k => [k, st.entries.filter(FIL[k]).length]));
+  let lastM = '', hist = '';
+  for (const e of ents) { const m = e.date.slice(0, 7); if (m !== lastM) { hist += `<div class="pj-month">${monthLabel(m)}</div>`; lastM = m; } hist += entryItem(e); }
+  const openRecIds = live().filter(e => e.type === 'recoverable' && e.workId === wid && recInfo(e).remaining > 0).map(e => e.id);
   return `<div class="iv-body">
-    <section class="iv-hero">
-      <div class="iv-hero-top"><span>${[w.ref ? 'Ref ' + esc(w.ref) : '', w.closed ? 'Finished' : 'Open', last ? 'last entry ' + fmtShort(last) : ''].filter(Boolean).join(' · ')}</span></div>
-      <div class="iv-hero-amt">${money(st.total)}</div>
-      <div class="muted small" style="margin:-4px 0 10px">spent on this project so far</div>
-      ${st.total ? `<div class="iv-split">${st.own ? `<i class="own" style="width:${ownPct}%"></i>` : ''}${st.rec ? `<i class="rec" style="width:${100 - ownPct}%"></i>` : ''}</div>
-      <div class="iv-legend">${st.own ? `<span><i class="k-own"></i>My own ${money(st.own)}</span>` : ''}${st.rec ? `<span><i class="k-rec"></i>To be repaid ${money(st.rec)}</span>` : ''}</div>` : ''}
-      <div class="iv-stats">
-        <div><span>Still to get back</span><b class="${st.recPending ? 'in' : ''}">${money(st.recPending)}</b></div>
-        <div><span>Given to spend</span><b>${money(st.adv)}</b></div>
-        <div><span>Cash with people</span><b class="${withPeople ? 'warn' : ''}">${money(withPeople)}</b></div>
-      </div>
-    </section>
-    <div class="pj-actions">
-      <button class="btn" data-act="addToWork" data-p="${wid}">+ Add</button>
-      <button class="btn" data-act="shareWork" data-p="${wid}">WhatsApp</button>
-      <button class="btn" data-act="printWork" data-p="${wid}">PDF</button>
-      <button class="btn" data-act="editWork" data-id="${wid}">Edit</button>
-    </div>
-    ${cats.length ? `<section class="iv-card"><div class="iv-h">What it went on</div>${cats.length > 1 ? `<div class="iv-donut-wrap">${ivDonut(slices, st.total)}</div>` : ''}
-      <div class="iv-list">${slices.map(sl => `<div class="iv-row"><i class="iv-sw" style="background:${sl.color}"></i><span class="grow"><span class="iv-rn">${esc(sl.name)}</span></span><span class="iv-rv"><b>${money(sl.v)}</b><span>${Math.round(sl.v / st.total * 100)}%</span></span></div>`).join('')}</div></section>` : ''}
-    ${months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, months[months.length - 1].m)}</section>` : ''}
-    <div class="iv-h" style="margin-top:6px">Entries <span>${ents.length}</span></div>
-    <div class="card flush">${ents.length ? ents.map(e => entryItem(e)).join('') : '<div class="empty">Nothing linked yet. Tap “+ Add entry”, or pick this project on the Add screen.</div>'}</div>
+  <div class="phero">
+    <span class="ico av lg" aria-hidden="true">${esc((w.name.trim()[0] || '?').toUpperCase())}</span>
+    <div class="grow"><h2>${esc(w.name)}</h2>
+      <div class="muted small">${[w.ref ? 'Ref ' + esc(w.ref) : '', w.closed ? 'Finished' : 'Open'].filter(Boolean).join(' · ')}</div>
+      <div class="hlinks"><button class="link" data-act="editWork" data-id="${wid}">Edit</button><span>·</span><button class="link" data-act="shareWork" data-p="${wid}">Share</button><span>·</span><button class="link" data-act="printWork" data-p="${wid}">PDF</button></div></div>
+  </div>
+  <div class="pbal"><span class="lbl">Spent on this project</span><b>${money(st.total)}</b></div>
+  ${budget ? `<div class="pj-budget ${used > 1 ? 'over' : used > .9 ? 'near' : ''}"><div class="bar"><i style="width:${Math.min(100, used * 100)}%"></i></div>
+    <div class="pj-bsub"><span>${Math.round(used * 100)}% of estimate ${money(budget)}</span><b>${used > 1 ? money(r2(st.total - budget)) + ' over' : money(r2(budget - st.total)) + ' left'}</b></div></div>` : ''}
+  <div class="pills pfit">
+    <button class="pill primary" data-act="addToWork" data-p="${wid}">+ Spent</button>
+    <button class="pill" data-act="giveForWork" data-p="${wid}">Gave to spend</button>
+    ${openRecIds.length ? `<button class="pill" data-act="recoverWork" data-p="${wid}">Got paid back</button>` : ''}
+  </div>
+  <div class="iv-stats pj-stats">
+    <div><span>${monthLabel(ym).split(' ')[0]}</span><b>${money(month)}</b></div>
+    <div><span>Still to get back</span><b class="${st.recPending ? 'in' : ''}">${money(st.recPending)}</b></div>
+    <div><span>Cash with people</span><b class="${withPeople ? 'warn' : ''}">${money(withPeople)}</b></div>
+  </div>
+  ${st.own && st.rec ? `<div class="pj-split"><div class="iv-split"><i class="own" style="width:${ownPct}%"></i><i class="rec" style="width:${100 - ownPct}%"></i></div>
+    <div class="iv-legend"><span><i class="k-own"></i>My own ${money(st.own)}</span><span><i class="k-rec"></i>To be repaid ${money(st.rec)}</span></div></div>` : ''}
+  ${withPeople ? `<p class="iv-pace">Cash still with your people: <b>${money(withPeople)}</b>. Ask them for bills or the change.</p>` : ''}
+  ${cats.length ? `<section class="iv-card"><div class="iv-h">What it went on</div>${cats.length > 1 ? `<div class="iv-donut-wrap">${ivDonut(slices, st.total)}</div>` : ''}
+    <div class="iv-list">${slices.map(sl => `<div class="iv-row"><i class="iv-sw" style="background:${sl.color}"></i><span class="grow"><span class="iv-rn">${esc(sl.name)}</span></span><span class="iv-rv"><b>${money(sl.v)}</b><span>${Math.round(sl.v / st.total * 100)}%</span></span></div>`).join('')}</div></section>` : ''}
+  ${months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, months[months.length - 1].m)}</section>` : ''}
+  <div class="sec-title">Entries</div>
+  ${st.entries.length ? `<div class="chips pj-chips">${[['all', 'All'], ['own', 'My own'], ['rec', 'To be repaid'], ['given', 'Given / back']].filter(([k]) => k === 'all' || counts[k]).map(([k, l]) => `<button class="chip ${pjf === k ? 'on' : ''}" data-act="pjF" data-v="${k}">${l} (${counts[k]})</button>`).join('')}</div>` : ''}
+  <div class="list">${hist || '<div class="empty">Nothing linked yet. Tap “+ Spent”, or pick this project on the Add screen.</div>'}</div>
+  <div class="linkrow minor mt"><button class="link" data-act="toggleWorkDone" data-p="${wid}">${w.closed ? 'Reopen project' : 'Mark as finished'}</button></div>
   </div>`;
 };
 
@@ -2395,7 +2467,7 @@ const HELP = [
     ['I paid for office work and will NOT be reimbursed', `<p>Same, but choose <b>Not coming back</b>. It counts as your spending, tagged Office.</p>`],
     ['The office paid me back', `<p>Open Office in People → <b>I received</b> → <b>Paying back items</b> → Save. Then check which items the money covers. Each item closes on its own; a part payment leaves the rest open. If they paid more than the items, the extra reduces what they owe.</p>`],
     ['I will never get it back', `<p>Open the item → <b>Won't get it back</b>. From then on it counts as your own spending.</p>`],
-    ['Group costs of one job or site', `<p><b>☰ → Projects</b> → add one (e.g. "Canal bank repair"). Then pick it on the <b>Project</b> line under Area when adding entries (it shows once you have an open project, and always starts at None). The project page shows the total, your own share vs what will be repaid, what it went on, month by month, and cash still with your people. Mark it <b>Finished</b> when done.</p>`]
+    ['Group costs of one job or site', `<p><b>☰ → Projects</b> → add one (e.g. "Canal bank repair"). Then pick it on the <b>Project</b> line under Area when adding entries (it shows once you have an open project, and always starts at None). The project page shows the total, your own share vs what will be repaid, what it went on, month by month, and cash still with your people. Add an <b>Estimate / budget</b> (Edit) to see how much of it is used. On the project page: <b>+ Spent</b>, <b>Gave to spend</b> (cash to someone for this project), <b>Got paid back</b>, and entries by month with filters. <b>Mark as finished</b> when done.</p>`]
   ]],
   ['Bills', [
     ['Add a monthly bill', `<p><b>Bills → + Add bill</b> → pick the type (Electricity, Gas, Internet…) → amount → due date → <b>How often: Every month</b>.</p>`],
@@ -2759,6 +2831,7 @@ function openWorkEditor(id, fromForm) {
   openSheet(`${sheetHead(w ? 'Edit project' : 'New project / site')}
     <div class="field"><label>Name</label><input id="wName" value="${esc(w?.name || '')}" placeholder="e.g. Office repair, Wedding, Site name"></div>
     <div class="field"><label>Reference (optional)</label><input id="wRef" value="${esc(w?.ref || '')}" placeholder="Estimate or project no."></div>
+    <div class="field"><label>Estimate / budget (optional)</label><input id="wBudget" inputmode="decimal" value="${w?.budget ? esc(String(w.budget)) : ''}" placeholder="Total you expect to spend"></div>
     ${w ? `<label class="inline-check"><input type="checkbox" class="check" id="wClosed" ${w.closed ? 'checked' : ''}> Finished (hide from the Add screen)</label>` : ''}
     <div class="btn-row">${w ? `<button class="btn danger" data-act="deleteWork" data-id="${w.id}">Delete</button>` : ''}<button class="btn primary" data-act="saveWork" data-id="${w?.id || ''}">Save</button></div>`);
   setTimeout(() => $('#wName')?.focus(), 50);
@@ -2766,7 +2839,7 @@ function openWorkEditor(id, fromForm) {
 async function saveWork(id) {
   const name = $('#wName').value.trim();
   if (!name) { toast('Enter a name'); return; }
-  const data = { name, ref: $('#wRef').value.trim() };
+  const bud = evalAmount($('#wBudget')?.value || ''); const data = { name, ref: $('#wRef').value.trim(), budget: bud > 0 ? bud : 0 };
   if ($('#wClosed')) data.closed = $('#wClosed').checked;
   let wid = id;
   if (id) Object.assign(work(id), data);
@@ -3184,6 +3257,7 @@ const ACT = {
     go('entries');
   },
   clearEF: () => { ui.entryFilter = null; render(); },
+  allCats: () => { ui.allCats = !ui.allCats; render(); },
   catEntries: el => { ui.entryFilter = { month: today().slice(0, 7), type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false, cat: el.dataset.c }; go('entries'); },
   pasteSms: () => pasteSms(),
   smsFromBox: () => { const t = $('#smsText').value; closeSheet(); openFromSms(t); },
@@ -3430,6 +3504,11 @@ const ACT = {
   printPerson: el => { closeSheet(); printPerson(el.dataset.p); },
   shareWork: el => openWhatsApp('', workText(el.dataset.p)),
   addToWork: el => openFormWith({ type: 'expense', workId: el.dataset.p }),
+  giveForWork: el => { openFormWith({ type: 'expense', workId: el.dataset.p, forOpen: true, what: 'spend' }); },
+  recoverWork: el => openRecovery(live().filter(e => e.type === 'recoverable' && e.workId === el.dataset.p && recInfo(e).remaining > 0).map(e => e.id), { returnTo: { tab, stack: [...stack], cur: { ...cur } } }),
+  toggleWorkDone: async el => { const w = work(el.dataset.p); if (!w) return; w.closed = !w.closed; await save(); toast(w.closed ? 'Marked as finished' : 'Reopened'); render(); },
+  projF: el => { ui.projF = el.dataset.v; render(); },
+  pjF: el => { ui.pjF = el.dataset.v; render(); },
   printWork: el => printWork(el.dataset.p),
   renameTpl: async el => {
     const t = S.templates.find(x => x.id === el.dataset.id); if (!t) return;

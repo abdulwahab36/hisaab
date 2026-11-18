@@ -69,6 +69,13 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - Areas, Categories and Projects lists show entries and this month's amount; tap a row for its entries, the pencil to edit. Project page: total, own vs to be repaid, still to get back, cash with people, what it went on, month by month.
 - ☰ menu grouped into Money, Organise and App.
 
+## v37
+- Projects list works like People: Open / Finished / All, search, + Project; each row shows only the name and amount. Tap › for everything else.
+- Project page: Edit · Share · PDF under the name; optional estimate with % used; + Spent, Gave to spend, Got paid back; this month, still to get back, cash with people; what it went on; month by month; entries by month with filters; Mark as finished.
+- Person page: Edit · Share · Call under the name.
+- Add form: the 6 most used categories, most used first; "All" / "More…" shows the rest.
+- ☰ menu: icons, Money / Organise / App sections, short values on the right.
+
 ## Help inside the app
 ☰ > How to use Hisaab: every task explained in plain steps with examples, with a search box.
 
