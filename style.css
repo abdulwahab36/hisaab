@@ -799,3 +799,50 @@ body.roottab:not(.nohead) main { padding-top: 46px; }
 .iv-spark text, .iv-donut text, .iv-cols text, .iv-ring text, .iv-cols rect { stroke: none; }
 .iv-ring text { font-size: 11px; }
 .iv-none { display: block; text-align: center; margin-bottom: 12px; border-radius: 12px; }
+
+/* ---------- All entries filter bar (v35) ---------- */
+.ef-search { position: relative; margin-bottom: 8px; }
+.ef-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--muted); }
+.ef-search .inp { padding-left: 38px; }
+.ef-month { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 6px; }
+.ef-month .icon-btn { width: 44px; height: 44px; font-size: 22px; color: var(--accent); }
+.ef-month .icon-btn:disabled { color: var(--line); }
+.ef-month b { font-size: 16px; font-weight: 700; }
+.ef-month .link { min-height: 44px; }
+.ef-mlabel { position: relative; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+.ef-mlabel input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.ef-chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; }
+.ef-chips::-webkit-scrollbar { display: none; }
+.ef-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.ef-chip svg { width: 16px; height: 16px; }
+.ef-chip.on { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.ef-chip.on span { font-size: 16px; line-height: 1; opacity: .8; }
+.ef-chip.filter.has { border-color: var(--accent); color: var(--accent); }
+.ef-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 13px; color: var(--muted); margin: 0 2px 8px; }
+.ef-sum b { font-variant-numeric: tabular-nums; }
+.ef-sum .link { margin-left: auto; }
+
+/* ---------- Bill page (v35) ---------- */
+.bl-head { display: flex; align-items: flex-start; gap: 12px; margin: 2px 0 12px; }
+.bl-sub { font-size: 13px; color: var(--muted); margin: 2px 0 6px; }
+.bl-ref { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.bl-ref span { color: var(--muted); }
+.bl-ref b { font-variant-numeric: tabular-nums; letter-spacing: .3px; }
+.bl-now.od { border-color: var(--danger); }
+.bl-now .btn-row { margin-top: 12px; }
+.bl-spark { display: inline-flex; align-items: flex-end; gap: 2px; height: 24px; width: 40px; margin-right: 4px; }
+.bl-spark i { flex: 1; background: var(--c-prev); border-radius: 2px; }
+.bl-spark i:last-child { background: var(--accent); }
+.refline { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.iv-body > .iv-tiles { margin-bottom: 12px; }
+.bills-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.bills-bar .chips { flex: 1; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.bills-bar .chips::-webkit-scrollbar { display: none; }
+.bills-bar .chip { flex: none; }
+
+/* ---------- Bank SMS (v35) ---------- */
+.sms-card { background: var(--accent-soft); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; font-size: 13px; }
+.sms-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.sms-facts { color: var(--text); line-height: 1.5; margin-bottom: 4px; }
+.sms-dup { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pastesms { display: block; margin: -4px 2px 10px; }

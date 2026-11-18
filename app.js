@@ -583,6 +583,7 @@ function render() {
   if (cur.v === 'person') title = '';
   if (cur.v === 'pending') title = ui.pendingSeg === 'exp' ? 'Upcoming' : 'To get back';
   if (cur.v === 'work') title = work(cur.p)?.name || 'Work';
+  if (cur.v === 'bill') { const b = billSeries(cur.p).at(-1); title = b ? entryTitle(b) : 'Bill'; }
   if (cur.v === 'add' && form.editingId) title = form.draftId ? 'Complete entry' : 'Edit entry';
   if (cur.v === 'add' && form.type === 'expected' && form.direction === 'out') title = form.editingId ? 'Edit bill' : 'Add bill';
   if (cur.v === 'add' && form.kind === 'person' && !form.viaFor && person(form.personId)) title = person(form.personId).name;
@@ -593,6 +594,30 @@ function render() {
   const fn = VIEWS[cur.v] || VIEWS.home;
   $('#view').innerHTML = fn(cur.p);
   if (cur.v === 'add') afterAddRender();
+  saveNav();
+}
+// Remember where you are, so pulling down to refresh keeps you on the same screen.
+const NAV_KEEP = ['home', 'people', 'bills', 'insights', 'entries', 'person', 'work', 'works', 'bill', 'budgets', 'accounts', 'books', 'cats', 'prefs', 'backup', 'help', 'pending', 'templates', 'security'];
+function saveNav() {
+  try {
+    if (!S.settings.onboarded || !NAV_KEEP.includes(cur.v)) { sessionStorage.removeItem('hisaab_nav'); return; }
+    sessionStorage.setItem('hisaab_nav', JSON.stringify({ tab, v: cur.v, p: cur.p, insMonth, insTab: ui.insTab || '', ef: cur.v === 'entries' ? ui.entryFilter : null, t: Date.now() }));
+  } catch (e) { /* ignore */ }
+}
+function restoreNav() {
+  try {
+    const n = JSON.parse(sessionStorage.getItem('hisaab_nav') || 'null');
+    if (!n || !S.settings.onboarded || !NAV_KEEP.includes(n.v) || Date.now() - n.t > 12 * 3600e3) return;
+    if (n.v === 'person' && !person(n.p)) return;
+    if (n.v === 'work' && !work(n.p)) return;
+    if (n.v === 'bill' && !billSeries(n.p).length) return;
+    tab = ['home', 'people', 'bills', 'insights'].includes(n.tab) ? n.tab : 'home';
+    insMonth = n.insMonth || null; if (n.insTab) ui.insTab = n.insTab;
+    if (n.ef) ui.entryFilter = n.ef;
+    cur = { v: n.v, p: n.p };
+    stack = n.v === tab ? [] : [{ v: tab, p: null, tab, y: 0 }];
+    if (stack.length) pushHist();
+  } catch (e) { /* ignore */ }
 }
 
 // ---------------- Views ----------------
@@ -747,6 +772,7 @@ VIEWS.home = () => {
     ${S.templates.map(tp => `<button class="chip" data-act="useTpl" data-id="${tp.id}">${esc(tp.name)}</button>`).join('')}
     ${ag.map(x => `<button class="chip" data-act="addAgain" data-d='${esc(JSON.stringify(x.d))}'>${svgIcon(catIcon(x.label))}${esc(x.label)} <span class="muted">${money(x.amount)}</span></button>`).join('')}
     <button class="chip" data-act="snap">${svgIcon('camera')} Snap receipt</button>
+    <button class="chip" data-act="pasteSms">${svgIcon('receipt')} Paste bank SMS</button>
   </div>
   ${!ag.length && !S.templates.length ? '<p class="muted small" style="margin:8px 2px 0">Things you enter often will appear here for one-tap entry.</p>' : ''}`; })()}
   <div class="sec-title">Recent <button data-act="goEntries" data-filter="">See all ›</button></div>
@@ -961,7 +987,7 @@ function resetForm(over = {}) {
     type: 'expense', amount: '', date: today(), paidFrom: L.paidFrom || (S.accounts[0] ? 'a:' + S.accounts[0].id : ''),
     accountId: L.accountId || (S.accounts[0]?.id || ''), toAccountId: '', bookId: '', categoryId: '', workId: '',
     personId: '', recoverFrom: '', dueDate: '', direction: 'in', repeat: '', note: '',
-    receipt: '', receiptData: '', saveTpl: false, tplName: '',
+    receipt: '', receiptData: '', saveTpl: false, tplName: '', txId: '', units: '', billRef: '', sms: null,
     editingId: null, draftId: null, linkExpected: null, returnTo: null, fromQuick: false, forId: '', what: '', viaFor: false, forcedType: '', forOpen: false, ...u, ...over
   };
   if (!form.forId && form.dir === 'out' && form.recoverFrom && ['me', 'back'].includes(form.kind)) { form.forId = form.recoverFrom; form.what = form.kind === 'back' ? 'back' : 'gone'; form.viaFor = true; }
@@ -1003,6 +1029,8 @@ VIEWS.add = () => {
   const forMode = (f.dir === 'out' || f.dir === 'in') && !personMode && !billOnly && (f.viaFor || ['me', 'back', 'income'].includes(f.kind));
   const forP = person(f.forId);
   const forShown = forMode && (f.forOpen || f.forId || f.kind === 'back');
+  if (f.sms) parts.push(smsBanner(f));
+  else if (!f.editingId && !billOnly && !personMode && f.dir !== 'move' && !f.linkExpected && !f.amount) parts.push(`<button type="button" class="link small pastesms" data-act="pasteSms">Paid from a bank app? Paste its SMS</button>`);
   if (forMode && !forShown && !f.later) parts.push(`<button type="button" class="forlink" data-act="forOpen">${f.dir === 'in' ? 'From someone? Loan, money back…' : 'For someone else? Family, friend, office…'}<span>›</span></button>`);
   if (forShown) {
     const isIn = f.dir === 'in';
@@ -1053,7 +1081,11 @@ VIEWS.add = () => {
     const due = live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date <= lim).sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 3);
     if (due.length) parts.push(`<div class="billhint"><span>Paying a bill?</span>${due.map(e => `<button type="button" class="chip" data-act="useBill" data-id="${e.id}">${svgIcon(catIcon(e.note || cat(e.categoryId)?.name))}${esc(entryTitle(e))} ${money(expectedInfo(e).rem)}</button>`).join('')}</div>`);
   }
-  if (f.linkExpected && f.type === 'expense') { const x = S.entries.find(e => e.id === f.linkExpected); if (x) parts.push(`<div class="type-hint">Paying the bill <b>${esc(entryTitle(x))}</b>. It will be marked paid. <button class="link small" data-act="unlinkBill">Not this bill</button></div>`); }
+  if (f.linkExpected && f.type === 'expense') { const x = S.entries.find(e => e.id === f.linkExpected); if (x) {
+    parts.push(`<div class="type-hint">Paying the bill <b>${esc(entryTitle(x))}</b>. It will be marked paid. <button class="link small" data-act="unlinkBill">Not this bill</button>${x.ref ? `<div class="refline">Ref <b>${esc(x.ref)}</b> <button class="btn sm" data-act="copyRef" data-v="${esc(x.ref)}">Copy</button></div>` : ''}${x.estimated ? `<div class="muted small">The amount is an estimate. Type the amount on your bill.</div>` : ''}</div>`);
+    parts.push(`<div class="two"><div class="field"><label>Transaction ID <span class="muted">(optional)</span></label><input data-f="txId" value="${esc(f.txId || '')}" placeholder="From the bank message" autocomplete="off"></div>${billUnitsOk(x) ? `<div class="field"><label>Units used <span class="muted">(optional)</span></label><input data-f="units" value="${esc(f.units || '')}" inputmode="numeric" placeholder="e.g. 240"></div>` : ''}</div>`);
+  } }
+  else if (f.txId && f.type !== 'expected') parts.push(`<div class="field"><label>Transaction ID</label><input data-f="txId" value="${esc(f.txId)}" autocomplete="off"></div>`);
   if (has('person*') && f.viaFor) { /* person chosen in For/From whom */ }
   else if (has('person*') && !S.people.length) parts.push(`<div class="field"><label>${f.type === 'lent' ? 'To whom' : 'From whom'}</label><button type="button" class="btn primary block" data-act="editPerson" data-fromform="personId">+ Add the person first</button></div>`);
   else if (has('person*')) parts.push(`<div class="field"><label>${f.type === 'lent' ? 'To whom' : 'From whom'}</label><div class="row"><select class="inp grow" data-f="personId">${opt(S.people, f.personId, 'Select person')}</select><button type="button" class="btn sm" data-act="editPerson" data-fromform="personId">+ New</button></div></div>`);
@@ -1079,6 +1111,7 @@ VIEWS.add = () => {
   const repeatField = `<div class="field"><label>How often</label><select data-f="repeat">${REPEAT_OPT.map(([k, l]) => `<option value="${k}" ${(f.repeat || '') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
   if (billMode) {
     parts.push(`<div class="field"><label>Bill name</label><input data-f="note" value="${esc(f.note)}" placeholder="e.g. LESCO, SNGPL, PTCL, Netflix" maxlength="80"></div>`);
+    parts.push(`<div class="field"><label>Reference / consumer no. <span class="muted">(optional)</span></label><input data-f="billRef" value="${esc(f.billRef || '')}" placeholder="From the printed bill" autocomplete="off" maxlength="40"></div>`);
     parts.push(`<div class="two">${dateField}${repeatField}</div>`);
     if (f.repeat && f.date) parts.push(`<div class="type-hint">After you pay, the next one is due on <b>${fmtDate(nextDue(f.date, f.repeat))}</b>.</div>`);
     parts.push(`<div class="field"><label>Usually paid from</label><select data-f="accountId">${opt(accOpts, f.accountId, 'Choose when paying')}</select></div>`);
@@ -1175,6 +1208,9 @@ function formToEntry() {
   }
   if (has('repeat')) e.repeat = REPEAT_M[f.repeat] ? f.repeat : '';
   if (f.linkExpected) e.linkExpected = f.linkExpected;
+  if (e.type === 'expected' && e.direction === 'out' && (f.billRef || '').trim()) e.ref = f.billRef.trim();
+  if ((f.txId || '').trim() && e.type !== 'expected') e.txId = f.txId.trim();
+  if (f.linkExpected && Number(f.units) > 0) e.units = Number(f.units);
   if (e.type === 'lent' || e.type === 'received') {
     const old = f.editingId ? S.entries.find(x => x.id === f.editingId) : null;
     const grp = e.type === 'lent' ? ['lent', 'advance', 'repaid'] : ['received', 'borrowed'];
@@ -1189,7 +1225,7 @@ function formToEntry() {
   return e;
 }
 
-const DIFF_KEYS = ['type', 'amount', 'date', 'oldEntry', 'accountId', 'toAccountId', 'viaPersonId', 'bookId', 'categoryId', 'workId', 'personId', 'dueDate', 'direction', 'repeat', 'note', 'receipt'];
+const DIFF_KEYS = ['txId', 'units', 'ref', 'type', 'amount', 'date', 'oldEntry', 'accountId', 'toAccountId', 'viaPersonId', 'bookId', 'categoryId', 'workId', 'personId', 'dueDate', 'direction', 'repeat', 'note', 'receipt'];
 function diffEntry(a, b) {
   const ch = {};
   for (const k of DIFF_KEYS) { const x = a[k] ?? '', y = b[k] ?? ''; if (x !== y) ch[k] = [x, y]; }
@@ -1234,7 +1270,7 @@ async function saveForm(again = false) {
     const changes = diffEntry(old, e);
     const upd = { id: old.id, createdAt: old.createdAt || nowIso, history: old.history || [], ...e };
     if (e.type === 'recoverable' && old.writtenOff) upd.writtenOff = old.writtenOff;
-    if (e.type === 'expected') { upd.closed = old.closed || false; upd.spawned = old.spawned || false; }
+    if (e.type === 'expected') { upd.closed = old.closed || false; upd.spawned = old.spawned || false; if (old.direction === 'out' || e.direction === 'out') { upd.seriesId = billSid(old); if (old.estimated && old.amount === e.amount) upd.estimated = true; } }
     if (old.draft) { upd.createdAt = nowIso; }
     else if (Object.keys(changes).length) upd.history = [...upd.history, { at: nowIso, changes }];
     S.entries[idx] = upd;
@@ -1244,10 +1280,12 @@ async function saveForm(again = false) {
     if (dup && !(await confirmBox('Possible duplicate', `An entry of ${money(e.amount)} on ${fmtDate(e.date)} already exists ("${esc(entryTitle(dup))}"). Save anyway?`, 'Save anyway'))) return;
     e.receipt = TYPES[e.type].f.includes('receipt') ? await persistReceipt('') : '';
     e.id = uid(); e.createdAt = nowIso; e.history = [];
+    if (e.type === 'expected' && e.direction === 'out') e.seriesId = e.id;
     S.entries.push(e);
     savedId = e.id;
   }
 
+  if (f.sms && f.sms.digits && e.accountId && acc(e.accountId)) { S.settings.acctDigits = { ...(S.settings.acctDigits || {}), [f.sms.digits]: e.accountId }; }
   if (e.linkExpected) afterExpectedPayment(e.linkExpected);
   if (e.dueDate && e.personId && person(e.personId)) person(e.personId).dueDate = e.dueDate;
   if (e.categoryId && e.bookId) { S.settings.areaByCat = S.settings.areaByCat || {}; S.settings.areaByCat[e.categoryId] = e.bookId; }
@@ -1303,7 +1341,8 @@ function editEntry(id) {
     accountId: e.oldEntry ? '__old' : (e.accountId || ''), toAccountId: e.toAccountId || '', bookId: e.bookId || '', categoryId: e.categoryId || '',
     workId: e.workId || '', personId: e.type === 'recoverable' ? '' : (e.personId || ''), recoverFrom: e.type === 'recoverable' ? (e.personId || '') : e.type === 'expense' ? (e.spentOn || '') : '',
     dueDate: e.dueDate || '', direction: e.direction || 'in', repeat: e.repeat || '', receipt: e.receipt || '',
-    editingId: e.id, draftId: e.draft ? e.id : null, linkExpected: e.linkExpected || null
+    editingId: e.id, draftId: e.draft ? e.id : null, linkExpected: e.linkExpected || null,
+    txId: e.txId || '', units: e.units ? String(e.units) : '', billRef: e.ref || ''
   };
   if (!over.paidFrom) over.paidFrom = (S.settings.last.paidFrom || (S.accounts[0] ? 'a:' + S.accounts[0].id : ''));
   if (!over.accountId) over.accountId = S.settings.last.accountId || S.accounts[0]?.id || '';
@@ -1327,9 +1366,13 @@ function closeExpected(x) {
   x.closed = true;
   if (REPEAT_M[x.repeat] && !x.spawned) {
     x.spawned = true;
+    const due = nextDue(x.date, x.repeat), sid = x.direction === 'out' ? billSid(x) : '';
+    if (sid) x.seriesId = sid;
+    const est = sid ? billEstimate(sid, due) : null;
     S.entries.push({
-      id: uid(), type: 'expected', amount: x.amount, date: nextDue(x.date, x.repeat), note: x.note || '', categoryId: x.categoryId || '',
+      id: uid(), type: 'expected', amount: est ? est.v : x.amount, date: due, note: x.note || '', categoryId: x.categoryId || '',
       bookId: x.bookId || '', accountId: x.accountId || '', personId: x.personId || '', direction: x.direction, repeat: x.repeat, closed: false, spawned: false,
+      ...(sid ? { seriesId: sid, estimated: !!est } : {}), ...(x.ref ? { ref: x.ref } : {}),
       createdAt: new Date().toISOString(), history: []
     });
   }
@@ -1580,20 +1623,44 @@ VIEWS.entries = () => {
     if (F.work) list = list.filter(e => e.workId === F.work);
     if (F.cat) list = list.filter(e => catOf(e) === F.cat);
   }
-  if (F.q) { const q = F.q.toLowerCase(); list = list.filter(e => (entryTitle(e) + ' ' + entrySub(e) + ' ' + e.amount).toLowerCase().includes(q)); }
+  if (F.q) { const q = F.q.toLowerCase(); list = list.filter(e => (entryTitle(e) + ' ' + entrySub(e) + ' ' + e.amount + ' ' + (e.txId || '') + ' ' + (e.ref || '')).toLowerCase().includes(q)); }
   list.sort(sortDesc);
-  const types = [...TYPE_ORDER, 'recovery', 'adjustment'];
-  return `<input class="inp" placeholder="Search note, person, amount…" value="${esc(F.q)}" data-ef="q" style="margin-bottom:10px">
-  ${F.drafts ? `<div class="alert info"><span class="grow">Showing incomplete receipts</span><button class="link" data-act="clearEF">Show all</button></div>` : F.spentOnly ? `<div class="alert info"><span class="grow">Own spending${F.cat ? ': ' + esc(catName(F.cat)) : ''}</span><button class="link" data-act="clearEF">Show all</button></div>` : ''}
-  ${F.drafts ? '' : `<div class="two">
-    <div class="field"><input type="month" value="${esc(F.month)}" data-ef="month"></div>
-    <div class="field"><select data-ef="type"><option value="">All types</option>${types.map(t => `<option value="${t}" ${F.type === t ? 'selected' : ''}>${typeLabel(t)}</option>`).join('')}</select></div>
-    <div class="field"><select data-ef="book"><option value="">All books</option>${S.books.map(b => `<option value="${b.id}" ${F.book === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></div>
-    <div class="field"><select data-ef="person"><option value="">All people</option>${S.people.map(p => `<option value="${p.id}" ${F.person === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
-  </div>`}
-  <div class="muted small" style="margin:0 2px 6px">${list.length} entr${list.length === 1 ? 'y' : 'ies'}${F.month && !F.drafts ? ' · ' + monthLabel(F.month) : !F.month && F.from && !F.drafts ? ' · ' + esc(F.rangeLabel || '') : ''}</div>
-  <div class="card flush">${list.length ? list.map(e => entryItem(e)).join('') : '<div class="empty">No entries match.</div>'}</div>`;
+  const chip = (k, label) => `<button class="ef-chip on" data-act="efDrop" data-k="${k}" aria-label="Remove filter ${esc(label)}">${esc(label)}<span aria-hidden="true">×</span></button>`;
+  const active = [];
+  if (F.drafts) active.push(chip('drafts', 'Incomplete receipts'));
+  if (F.spentOnly) active.push(chip('spentOnly', 'Own spending'));
+  if (F.cat) active.push(chip('cat', catName(F.cat)));
+  if (F.type) active.push(chip('type', typeLabel(F.type)));
+  if (F.book) active.push(chip('book', bookName(F.book)));
+  if (F.person && person(F.person)) active.push(chip('person', person(F.person).name));
+  if (F.work && work(F.work)) active.push(chip('work', work(F.work).name));
+  const nMore = [F.type, F.book, F.person, F.work, F.cat].filter(Boolean).length;
+  const live0 = list.filter(e => e.type !== 'expected');
+  const outT = r2(live0.filter(e => entryFlow(e) === 'out').reduce((x, e) => x + Math.abs(e.type === 'recoverable' && F.spentOnly && e.writtenOff ? e.writtenOff.amount : e.amount), 0));
+  const inT = r2(live0.filter(e => entryFlow(e) === 'in').reduce((x, e) => x + Math.abs(e.amount), 0));
+  const period = F.drafts ? '' : F.month ? `<div class="ef-month"><button class="icon-btn" data-act="efMonth" data-n="-1" aria-label="Previous month">‹</button>
+      <label class="ef-mlabel"><b>${monthLabel(F.month)}</b><input type="month" value="${esc(F.month)}" data-ef="month" aria-label="Pick month"></label>
+      <button class="icon-btn" data-act="efMonth" data-n="1" aria-label="Next month" ${F.month >= today().slice(0, 7) ? 'disabled' : ''}>›</button></div>`
+    : `<div class="ef-month"><span></span><b>${F.from ? esc(F.rangeLabel || fmtShort(F.from) + ' – ' + fmtShort(F.to)) : 'All dates'}</b><button class="link" data-act="efThisMonth">This month</button></div>`;
+  return `<div class="ef-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="inp" type="search" placeholder="Search note, person, amount…" value="${esc(F.q)}" data-ef="q" aria-label="Search entries"></div>
+  ${period}
+  <div class="ef-chips">${F.drafts ? '' : `<button class="ef-chip filter ${nMore ? 'has' : ''}" data-act="efSheet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filter${nMore ? ' · ' + nMore : ''}</button>`}${active.join('')}${F.month && !F.drafts ? `<button class="ef-chip" data-act="efAllTime">All dates</button>` : ''}</div>
+  <div class="ef-sum"><span>${list.length} entr${list.length === 1 ? 'y' : 'ies'}</span>${outT ? `<span>Out <b class="out">${money(outT)}</b></span>` : ''}${inT ? `<span>In <b class="in">${money(inT)}</b></span>` : ''}${active.length ? `<button class="link" data-act="clearEF">Clear all</button>` : ''}</div>
+  <div class="card flush">${list.length ? list.map(e => entryItem(e)).join('') : `<div class="empty">No entries match.${active.length || F.q ? ' <button class="link" data-act="clearEF">Clear filters</button>' : ''}</div>`}</div>`;
 };
+function efSheetHtml() {
+  const F = ui.entryFilter, types = [...TYPE_ORDER, 'recovery', 'adjustment'];
+  const sel = (k, label, opts, none) => `<div class="field"><label>${label}</label><select data-ef="${k}" data-efsheet="1"><option value="">${none}</option>${opts}</select></div>`;
+  const o = (list, v) => list.map(x => `<option value="${x.id}" ${v === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  return `${sheetHead('Filter entries')}
+    ${sel('type', 'Type', types.map(t => `<option value="${t}" ${F.type === t ? 'selected' : ''}>${typeLabel(t)}</option>`).join(''), 'All types')}
+    ${sel('cat', 'Category', o(S.categories, F.cat), 'All categories')}
+    ${S.books.length ? sel('book', 'Area', o(S.books, F.book), 'All areas') : ''}
+    ${S.people.length ? sel('person', 'Person', o(S.people, F.person), 'All people') : ''}
+    ${S.works.length ? sel('work', 'Project / site', o(S.works, F.work), 'All projects') : ''}
+    <label class="inline-check"><input type="checkbox" class="check" data-act="efSpent" ${F.spentOnly ? 'checked' : ''}> Only my own spending</label>
+    <div class="btn-row mt"><button class="btn" data-act="efReset">Reset</button><button class="btn primary" data-act="closeSheet">Show ${'results'}</button></div>`;
+}
 
 // ---------------- Bills ----------------
 function billStats(t) {
@@ -1621,13 +1688,13 @@ function billsList() {
   const st = billStats(t), overdue = unpaid.filter(e => e.date < t).length;
   const row = e => { const od = e.date < t, d = daysBetween(t, e.date);
     return `<div class="list-item">${entryIcon(e)}
-    <button class="li-main" style="text-align:left" data-act="openEntry" data-id="${e.id}"><div class="li-title">${esc(entryTitle(e))}</div>
-    <div class="li-sub ${od ? 'danger' : d <= 3 ? 'warn' : ''}">${od ? 'Overdue since ' + fmtShort(e.date) : d === 0 ? 'Due today' : 'Due ' + fmtShort(e.date)}${REPEAT_LBL[e.repeat] ? ' · ' + REPEAT_LBL[e.repeat] : ''}</div></button>
-    <div class="li-amt">${money(expectedInfo(e).rem)}<div><button class="btn sm" data-act="payExpected" data-id="${e.id}">Pay</button></div></div></div>`; };
+    <button class="li-main" style="text-align:left" data-act="go" data-v="bill" data-p="${esc(billSid(e))}"><div class="li-title">${esc(entryTitle(e))}</div>
+    <div class="li-sub ${od ? 'danger' : d <= 3 ? 'warn' : ''}">${od ? 'Overdue since ' + fmtShort(e.date) : d === 0 ? 'Due today' : 'Due ' + fmtShort(e.date)}${REPEAT_LBL[e.repeat] ? ' · ' + REPEAT_LBL[e.repeat] : ''}${e.estimated ? ' · estimate' : ''}</div></button>
+    <div class="li-amt">${e.estimated ? '≈ ' : ''}${money(expectedInfo(e).rem)}<div><button class="btn sm" data-act="payExpected" data-id="${e.id}">Pay</button></div></div></div>`; };
   const unpaidHtml = unpaid.length ? `<div class="card flush">${unpaid.map(row).join('')}</div>`
     : `<div class="empty">${S.entries.some(e => e.type === 'expected' && e.direction === 'out') ? 'All bills paid ✓' : 'No bills yet. Add electricity, gas, internet, rent, or subscriptions like Netflix or ChatGPT.'}</div>`;
   const paidHtml = paid.length ? `<div class="card flush">${paid.map(e => entryItem(e)).join('')}</div>` : '<div class="empty">No bill payments yet.</div>';
-  const counts = { unpaid: unpaid.length, paid: paid.length };
+  const counts = { unpaid: unpaid.length, paid: paid.length, mine: allBillSids().length };
   const ymNow = t.slice(0, 7);
   const leftM = r2(unpaid.filter(e => e.date <= ymNow + '-31').reduce((a, e) => a + expectedInfo(e).rem, 0));
   const paidM = r2(paid.filter(e => e.date.slice(0, 7) === ymNow).reduce((a, e) => a + e.amount, 0));
@@ -1638,12 +1705,187 @@ function billsList() {
     <div class="bar"><i style="width:${pct}%"></i></div>
     <div class="bsum-sub"><span>${money(paidM)} paid</span><span>${overdue ? `<span class="danger">${overdue} overdue</span> · ` : ''}${money(leftM)} left</span></div>
   </div>
-  <div class="row" style="margin-bottom:12px;flex-wrap:wrap">
-    <div class="chips grow">${[['unpaid', 'Unpaid'], ['paid', 'Paid'], ['all', 'All']].map(([k, l]) => `<button class="chip ${filt === k ? 'on' : ''}" data-act="billFilt" data-v="${k}">${l}${counts[k] !== undefined ? ' (' + counts[k] + ')' : ''}</button>`).join('')}</div>
-    <button class="btn primary sm" data-act="addBill">+ Add bill</button>
+  <div class="bills-bar">
+    <div class="chips">${[['unpaid', 'Unpaid'], ['paid', 'Paid'], ['mine', 'My bills']].map(([k, l]) => `<button class="chip ${filt === k ? 'on' : ''}" data-act="billFilt" data-v="${k}">${l}${counts[k] !== undefined ? ' (' + counts[k] + ')' : ''}</button>`).join('')}</div>
+    <button class="btn primary sm" data-act="addBill" aria-label="Add bill">+ Add</button>
   </div>
-  ${filt === 'unpaid' ? unpaidHtml : filt === 'paid' ? paidHtml : `<div class="sec-title">Unpaid</div>${unpaidHtml}<div class="sec-title">Paid</div>${paidHtml}`}
-  <p class="muted small mt">Bill amount changes every month? Enter the usual amount; when you tap Pay, type the real one. The next bill is created automatically.</p>`;
+  ${filt === 'unpaid' ? unpaidHtml : filt === 'paid' ? paidHtml : myBillsHtml()}
+  <p class="muted small mt">${filt === 'mine' ? 'Tap a bill to see every month: amounts, units, highest and lowest, and when you paid.' : 'Bill amount changes every month? The next bill is estimated from your history. Tap a bill to enter the real amount or see past months.'}</p>`;
+}
+
+// ---------------- Bank message → entry (share a bank SMS to Hisaab, or paste it) ----------------
+const BANK_WORDS = /\s+(?:mobilink(?:\s+mfb)?|jazz\s*cash|easy\s*paisa|telenor(?:\s+bank)?|u\s*microfinance(?:\s+bank)?|khushhali(?:\s+bank)?|finca|hbl|mcb(?:\s+bank)?|ubl|meezan(?:\s+bank)?|allied(?:\s+bank)?|abl|bank\s+al[\s-]*falah|alfalah|faysal(?:\s+bank)?|askari(?:\s+bank)?|bop|nbp|national\s+bank|bank\s+al[\s-]*habib|habib\s+metro(?:\s+bank)?|js\s+bank|standard\s+chartered|soneri(?:\s+bank)?|summit(?:\s+bank)?|silk\s*bank|dubai\s+islamic(?:\s+bank)?|bank\s*islami|al\s*baraka|sadapay|nayapay|zindigi|mfb|bank)\s*$/i;
+const MONTHS3 = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+function titleCase(s) { return s.toLowerCase().replace(/\b\p{L}/gu, c => c.toUpperCase()); }
+function parseBankSms(raw) {
+  const text = String(raw || '').replace(/\s+/g, ' ').trim(), r = { text };
+  const am = text.match(/(?:PKR|Rs\.?|RS)\s*:?\s*([\d,]+(?:\.\d{1,2})?)/i) || text.match(/([\d,]+(?:\.\d{1,2})?)\s*(?:PKR|Rs\.?)/i);
+  if (am) r.amount = Math.round(parseFloat(am[1].replace(/,/g, '')) * 100) / 100;
+  const outM = text.search(/\b(sent|debited|paid|transferred|withdrawn|withdrawal|purchase|spent|deducted|payment of|charged|bill payment)\b/i);
+  const inM = text.search(/\b(received|credited|deposited|refund(?:ed)?)\b/i);
+  r.dir = inM >= 0 && (outM < 0 || inM < outM) ? 'in' : 'out';
+  const who = r.dir === 'out'
+    ? text.match(/\b(?:sent|paid|transferred|transfer|payment)\s+(?:to|for)\s+(.+?)(?=\s+(?:from|via|on|at|using|through|A\/C|Acc(?:ount)?|IBAN|Ref|Tx|TID|Trx)\b|[.,;:]|$)/i) || text.match(/\bat\s+([A-Z][\w&' .-]{2,40}?)(?=\s+(?:on|via|from)\b|[.,;]|$)/)
+    : text.match(/\b(?:received|credited)\b.*?\bfrom\s+(.+?)(?=\s+(?:to|into|in|on|via|at|A\/C|Acc(?:ount)?|IBAN|Ref|Tx|TID|Trx)\b|[.,;:]|$)/i) || text.match(/\bfrom\s+(.+?)(?=\s+(?:to|into|in|on|via|A\/C)\b|[.,;:]|$)/i);
+  if (who) {
+    let n = who[1].trim();
+    for (let i = 0; i < 3; i++) n = n.replace(BANK_WORDS, '').trim();
+    if (n && !/^(?:your|a\/c|account)\b/i.test(n) && n.length <= 50) r.party = /[a-z]/.test(n) ? n : titleCase(n);
+  }
+  const ac = text.match(/\b(?:A\/C|Acc(?:ount)?|card)\s*(?:no\.?|number|ending(?:\s+in)?)?\s*[*xX#.\-]*\s*(\d{3,6})\b/i);
+  if (ac) r.digits = ac[1].slice(-4);
+  let dm = text.match(/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})\b/), d = null;
+  if (dm) d = [dm[3], dm[2], dm[1]];
+  else if ((dm = text.match(/\b(\d{1,2})[-\s]?([A-Za-z]{3})[a-z]*[-\s,]*(\d{2,4})\b/)) && MONTHS3[dm[2].toLowerCase()]) d = [dm[3], MONTHS3[dm[2].toLowerCase()], dm[1]];
+  if (d) {
+    const y = String(d[0]).length === 2 ? '20' + d[0] : String(d[0]), iso = `${y}-${String(d[1]).padStart(2, '0')}-${String(d[2]).padStart(2, '0')}`;
+    if (/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(iso) && iso <= addDays(today(), 1)) r.date = iso;
+  }
+  const tm = text.match(/\b(\d{1,2}:\d{2})(?::\d{2})?\s*(am|pm)?\b/i); if (tm) r.time = tm[1] + (tm[2] ? ' ' + tm[2].toUpperCase() : '');
+  const tx = text.match(/\b(?:Tx\s*ID|TID|Trx\s*ID|Txn\s*ID|Transaction\s*(?:ID|No\.?|#)|Ref(?:erence)?\s*(?:No\.?|#|ID)|RRN|STAN)\s*[:#.]?\s*([A-Z0-9][A-Z0-9-]{5,})/i);
+  if (tx) r.txId = tx[1];
+  const via = text.match(/\bvia\s+(RAAST|IBFT|1LINK|ATM|POS|Internet Banking|Mobile App|[A-Z]{3,10})\b/i); if (via) r.via = via[1].toUpperCase();
+  return r;
+}
+function smsBillMatch(r) {
+  const t = r.text.toLowerCase().replace(/\s+/g, '');
+  return live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed)
+    .find(e => (e.ref && t.includes(e.ref.replace(/\s+/g, '').toLowerCase())) || ((e.note || '').trim().length >= 3 && t.includes(e.note.trim().toLowerCase().replace(/\s+/g, ''))));
+}
+function openFromSms(raw) {
+  if (sheetOpen) closeSheet();
+  const r = parseBankSms(raw);
+  if (!r.amount) { toast('No amount found in that message'); openFormWith({ type: 'expense' }); return; }
+  if (r.txId) { const same = live().find(e => e.txId && e.txId === r.txId); if (same) { setTab('home'); openEntry(same.id); toast('Already added'); return; } }
+  const accId = r.digits && S.settings.acctDigits && acc(S.settings.acctDigits[r.digits]) ? S.settings.acctDigits[r.digits] : '';
+  const date = r.date || today();
+  const sms = { amount: r.amount, dir: r.dir, party: r.party || '', digits: r.digits || '', date, time: r.time || '', txId: r.txId || '', via: r.via || '' };
+  const bill = r.dir === 'out' ? smsBillMatch(r) : null;
+  const p = r.party ? S.people.find(x => x.name.toLowerCase().includes(r.party.toLowerCase()) || r.party.toLowerCase().includes(x.name.toLowerCase().replace(/\s*\(.*\)$/, ''))) : null;
+  const base = { amount: String(r.amount), date, txId: r.txId || '', sms };
+  if (accId) { base.accountId = accId; base.paidFrom = 'a:' + accId; }
+  if (bill) {
+    openFormWith({ ...base, type: 'expense', categoryId: bill.categoryId || '', bookId: bill.bookId || areaForCat(bill.categoryId), note: bill.note || '', linkExpected: bill.id, ...(accId ? {} : bill.accountId ? { accountId: bill.accountId, paidFrom: 'a:' + bill.accountId } : {}) });
+  } else if (p) {
+    openFormWith({ ...base, type: r.dir === 'in' ? 'income' : 'expense', forId: p.id, forOpen: true, what: defaultWhat(p.id, r.dir) });
+    applyWhat(); render();
+  } else {
+    openFormWith({ ...base, type: r.dir === 'in' ? 'income' : 'expense', note: r.party ? (r.dir === 'in' ? 'From ' : 'To ') + r.party : '' });
+  }
+}
+function smsBanner(f) {
+  const m = f.sms; if (!m) return '';
+  const dup = live().find(e => !e.txId && Math.abs(e.amount - m.amount) < 0.01 && e.date === f.date && e.id !== f.editingId && e.type !== 'expected');
+  const accKnown = m.digits && S.settings.acctDigits && S.settings.acctDigits[m.digits];
+  return `<div class="sms-card"><div class="sms-top"><b>From your bank message</b><button class="link small" data-act="smsDismiss">Clear</button></div>
+    <div class="sms-facts">${[money(m.amount) + (m.dir === 'in' ? ' received' : ' sent'), m.party ? (m.dir === 'in' ? 'from ' : 'to ') + esc(m.party) : '', fmtShort(m.date) + (m.time ? ' ' + esc(m.time) : ''), m.via ? esc(m.via) : '', m.digits ? 'A/C …' + esc(m.digits) : ''].filter(Boolean).join(' · ')}</div>
+    ${m.digits && !accKnown ? `<div class="muted small">Pick the account for …${esc(m.digits)} once; next time it is chosen for you.</div>` : ''}
+    ${dup ? `<div class="sms-dup">You already added <b>${money(dup.amount)}</b> “${esc(entryTitle(dup))}” on this day. <button class="btn sm" data-act="smsAttach" data-id="${dup.id}">That's this one</button></div>` : ''}
+  </div>`;
+}
+async function pasteSms() {
+  let txt = '';
+  try { txt = await navigator.clipboard.readText(); } catch (e) { /* permission denied or not supported */ }
+  if (!txt || !/\d/.test(txt)) {
+    openSheet(`${sheetHead('Paste bank message')}<p class="muted small" style="margin-bottom:8px">Copy the payment SMS from your bank, then paste it here.</p>
+      <textarea id="smsText" class="inp" rows="5" placeholder="PKR 12,000.00 sent to … Tx ID …"></textarea>
+      <button class="btn primary block mt" data-act="smsFromBox">Fill the form</button>`);
+    setTimeout(() => $('#smsText')?.focus(), 60); return;
+  }
+  openFromSms(txt);
+}
+
+// ---------------- Bill tracking (one page per bill: every month's amount, units, payment) ----------------
+function billNameKey(e) { return 'n:' + (e.note || '').trim().toLowerCase() + '|' + (e.categoryId || '') + '|' + (e.bookId || ''); }
+function billSid(e) { return e.seriesId || billNameKey(e); }
+function billSeries(sid) { return S.entries.filter(e => e.type === 'expected' && e.direction === 'out' && !e.draft && billSid(e) === sid).sort((a, b) => (a.date < b.date ? -1 : 1)); }
+function billUnitsOk(x) { return /electric|bijli|gas|water|wasa|sngpl|sui|lesco|fesco|iesco|mepco|gepco|pesco|hesco|qesco|k-?electric/i.test((x.note || '') + ' ' + (cat(x.categoryId)?.name || '')); }
+function billCycles(sid) {
+  return billSeries(sid).map(b => {
+    const pays = live().filter(e => e.linkExpected === b.id && e.type === 'expense').sort((a, c) => (a.date < c.date ? -1 : 1));
+    const paid = r2(pays.reduce((a, e) => a + e.amount, 0));
+    const units = pays.reduce((a, e) => a + (Number(e.units) || 0), 0);
+    const paidOn = pays.length ? pays[pays.length - 1].date : '';
+    const xi = expectedInfo(b);
+    return { b, ym: b.date.slice(0, 7), due: b.date, amount: b.amount, paid, pays, units, paidOn, late: paidOn && paidOn > b.date ? daysBetween(b.date, paidOn) : 0, open: !xi.closed, est: !!b.estimated };
+  });
+}
+// Next bill: same month last year if known (bills follow the seasons), else the average of the last 3.
+function billEstimate(sid, due) {
+  const paid = billCycles(sid).filter(c => c.paid > 0);
+  if (!paid.length) return null;
+  const ly = paid.find(c => c.ym === shiftYm(due.slice(0, 7), -12));
+  if (ly) return { v: Math.round(ly.paid / 10) * 10, why: 'same month last year' };
+  const last = paid.slice(-3), v = last.reduce((a, c) => a + c.paid, 0) / last.length;
+  return { v: Math.round(v / 10) * 10, why: last.length === 1 ? 'last bill' : `average of last ${last.length}` };
+}
+function allBillSids() {
+  const m = new Map();
+  for (const e of S.entries) if (e.type === 'expected' && e.direction === 'out' && !e.draft) { const k = billSid(e); if (!m.has(k) || m.get(k).date < e.date) m.set(k, e); }
+  return [...m.entries()].map(([sid, latest]) => ({ sid, latest }));
+}
+
+VIEWS.bill = (sid) => {
+  const cyc = billCycles(sid);
+  if (!cyc.length) return '<div class="empty">This bill no longer exists.</div>';
+  const t = today(), latest = cyc[cyc.length - 1].b, openC = cyc.find(c => c.open), x = openC ? openC.b : latest;
+  const paid = cyc.filter(c => c.paid > 0), last12 = paid.slice(-12);
+  const avg = last12.length ? last12.reduce((a, c) => a + c.paid, 0) / last12.length : 0;
+  const hi = last12.reduce((a, c) => (!a || c.paid > a.paid ? c : a), null), lo = last12.reduce((a, c) => (!a || c.paid < a.paid ? c : a), null);
+  const lastP = paid[paid.length - 1], prevP = paid[paid.length - 2];
+  const ch = lastP && prevP && prevP.paid ? Math.round((lastP.paid - prevP.paid) / prevP.paid * 100) : null;
+  const unitsRows = paid.filter(c => c.units > 0), rate = unitsRows.length ? unitsRows.reduce((a, c) => a + c.paid, 0) / unitsRows.reduce((a, c) => a + c.units, 0) : 0;
+  const est = openC && openC.est ? billEstimate(sid, openC.due) : null;
+  const sub = [cat(x.categoryId)?.name, book(x.bookId)?.name, REPEAT_LBL[x.repeat], acc(x.accountId) ? 'from ' + acc(x.accountId).name : ''].filter(Boolean).map(esc).join(' · ');
+  const ref = x.ref ? `<div class="bl-ref"><span>Reference no.</span><b>${esc(x.ref)}</b><button class="btn sm" data-act="copyRef" data-v="${esc(x.ref)}">Copy</button></div>`
+    : `<button class="link small" data-act="editEntry" data-id="${x.id}">+ Add reference / consumer no.</button>`;
+  let now = '';
+  if (openC) {
+    const od = openC.due < t, d = daysBetween(t, openC.due);
+    now = `<section class="iv-card bl-now ${od ? 'od' : ''}">
+      <div class="iv-hero-top"><span>${monthLabel(openC.ym)} bill</span><span class="iv-delta ${od ? 'up' : ''}">${od ? 'Overdue ' + Math.abs(d) + 'd' : d === 0 ? 'Due today' : 'Due ' + fmtShort(openC.due)}</span></div>
+      <div class="iv-hero-amt">${openC.est ? '≈ ' : ''}${money(expectedInfo(openC.b).rem)}</div>
+      ${openC.est ? `<p class="iv-pace">Estimate${est ? ' from the ' + esc(est.why) : ''}. When the bill comes, enter the real amount.</p>` : ''}
+      <div class="btn-row">${openC.est ? `<button class="btn" data-act="setBillAmt" data-id="${openC.b.id}">Enter bill amount</button>` : `<button class="btn" data-act="setBillAmt" data-id="${openC.b.id}">Change amount</button>`}<button class="btn primary" data-act="payExpected" data-id="${openC.b.id}">Pay</button></div>
+    </section>`;
+  } else now = `<div class="iv-pill iv-none">All paid ✓${x.repeat ? '' : ' · this bill does not repeat'}</div>`;
+  const tiles = last12.length ? `<div class="iv-tiles">
+      <div class="iv-tile"><span class="iv-tl">Average</span><b>${money(Math.round(avg))}</b><span class="iv-tm"><span>last ${last12.length} bill${last12.length > 1 ? 's' : ''}</span></span></div>
+      <div class="iv-tile"><span class="iv-tl">Last bill</span><b>${money(lastP.paid)}</b><span class="iv-tm"><span>${monthLabel(lastP.ym).split(' ')[0]}</span>${ch === null ? '' : `<span class="${ch > 0 ? 'up' : ch < 0 ? 'down' : ''}">${ch > 0 ? '▲' : ch < 0 ? '▼' : '='}${Math.abs(ch)}%</span>`}</span></div>
+      ${last12.length > 1 ? `<div class="iv-tile"><span class="iv-tl">Highest</span><b>${money(hi.paid)}</b><span class="iv-tm"><span>${monthLabel(hi.ym)}</span></span></div>
+      <div class="iv-tile"><span class="iv-tl">Lowest</span><b>${money(lo.paid)}</b><span class="iv-tm"><span>${monthLabel(lo.ym)}</span></span></div>` : ''}
+      ${rate ? `<div class="iv-tile"><span class="iv-tl">Per unit</span><b>${money(Math.round(rate * 10) / 10)}</b><span class="iv-tm"><span>average</span></span></div>
+      <div class="iv-tile"><span class="iv-tl">Units</span><b>${unitsRows[unitsRows.length - 1].units}</b><span class="iv-tm"><span>${monthLabel(unitsRows[unitsRows.length - 1].ym).split(' ')[0]}</span></span></div>` : ''}
+    </div>` : '';
+  const chart = paid.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(last12.map(c => ({ m: c.ym, v: c.paid })), lastP.ym)}</section>` : '';
+  const hist = cyc.slice().reverse().map(c => {
+    const p0 = c.pays[c.pays.length - 1];
+    const status = c.paid > 0 ? `Paid ${fmtShort(c.paidOn)}${c.late ? ` · <span class="warn">${c.late}d late</span>` : ''}` : c.open ? (c.due < t ? '<span class="danger">Overdue</span>' : 'Due ' + fmtShort(c.due)) : 'Closed without payment';
+    const extra = [c.units ? c.units + ' units' : '', p0 && p0.txId ? 'Tx ' + esc(p0.txId) : ''].filter(Boolean).join(' · ');
+    return `<button class="list-item" data-act="openEntry" data-id="${p0 ? p0.id : c.b.id}">
+      <div class="li-main"><div class="li-title">${monthLabel(c.ym)}</div><div class="li-sub">${status}${extra ? ' · ' + extra : ''}</div></div>
+      <div class="li-amt ${c.paid ? '' : 'muted'}">${c.paid ? money(c.paid) : (c.est ? '≈ ' : '') + money(c.amount)}</div></button>`;
+  }).join('');
+  return `<div class="iv-body">
+    <div class="bl-head">${entryIcon(x)}<div class="grow"><div class="bl-sub">${sub}</div>${ref}</div></div>
+    ${now}${tiles}${chart}
+    <div class="iv-h" style="margin-top:6px">History</div>
+    <div class="card flush">${hist}</div>
+    <div class="btn-row mt"><button class="btn" data-act="editEntry" data-id="${x.id}">Edit bill</button></div>
+    ${!unitsRows.length && billUnitsOk(x) ? '<p class="iv-foot">Tip: type the units from the bill when you pay. You will see units and cost per unit here.</p>' : ''}
+  </div>`;
+};
+function myBillsHtml() {
+  const rows = allBillSids().map(({ sid, latest }) => {
+    const cyc = billCycles(sid), paid = cyc.filter(c => c.paid > 0), l3 = paid.slice(-12);
+    const avg = l3.length ? l3.reduce((a, c) => a + c.paid, 0) / l3.length : 0, lastP = paid[paid.length - 1];
+    const spark = l3.length >= 2 ? (() => { const mx = Math.max(...l3.map(c => c.paid)); return `<span class="bl-spark" aria-hidden="true">${l3.slice(-6).map(c => `<i style="height:${Math.max(12, c.paid / mx * 100)}%"></i>`).join('')}</span>`; })() : '';
+    return { latest, sid, avg, lastP, spark, open: cyc.some(c => c.open) };
+  }).sort((a, b) => (b.open - a.open) || b.avg - a.avg);
+  if (!rows.length) return '<div class="empty">No bills yet.</div>';
+  return `<div class="card flush">${rows.map(r => `<button class="list-item" data-act="go" data-v="bill" data-p="${esc(r.sid)}">${entryIcon(r.latest)}
+    <div class="li-main"><div class="li-title">${esc(entryTitle(r.latest))}</div><div class="li-sub">${r.avg ? 'avg ' + money(Math.round(r.avg)) : 'no payments yet'}${r.lastP ? ' · last ' + money(r.lastP.paid) : ''}${r.open ? '' : ' · stopped'}</div></div>
+    ${r.spark}<span class="chev">›</span></button>`).join('')}</div>`;
 }
 
 // ---------------- Insights ----------------
@@ -2101,7 +2343,9 @@ const HELP = [
   ]],
   ['Bills', [
     ['Add a monthly bill', `<p><b>Bills → + Add bill</b> → pick the type (Electricity, Gas, Internet…) → amount → due date → <b>How often: Every month</b>.</p>`],
-    ['My bill amount changes every month', `<p>Enter your usual amount when adding the bill. When you pay, tap <b>Pay</b> and type the real amount. That month closes and next month's bill appears by itself.</p><p class="ex">Example: Usual Rs 6,000; this month you paid Rs 7,340. Spent shows Rs 7,340.</p>`],
+    ['My bill amount changes every month', `<p>Pay it once with the real amount. From then on the next bill is <b>estimated</b> (≈) from your history: the same month last year if known, else the average of the last 3. When the bill arrives, open it in <b>Bills</b> and tap <b>Enter bill amount</b>, or just type the real amount when you tap Pay.</p><p>Tap any bill to see every month: average, highest, lowest, last bill vs the one before, units and cost per unit, and whether you paid late.</p><p class="ex">Example: LESCO was Rs 21,500 in March and Rs 6,100 in July. Next March the estimate starts from last March.</p>`],
+    ['Reference no. and transaction ID', `<p>Add the <b>Reference / consumer no.</b> from the printed bill once (edit the bill). When you pay, tap <b>Copy</b> and paste it in your bank app.</p><p>After paying, add the bank's <b>Transaction ID</b> and, for electricity, gas or water, the <b>units</b>. Search in All entries finds both.</p>`],
+    ['Add a payment from a bank SMS', `<p>Long-press the bank or wallet SMS → <b>Share</b> → <b>Hisaab</b> (the app must be installed to the home screen). Or copy the SMS and tap <b>Paste bank SMS</b> on Home.</p><p>The amount, date, name, account and transaction ID fill in. Pick the account once for each A/C number; next time it is picked for you. If it matches a bill, the bill is marked paid. Sharing the same SMS twice will not add it twice.</p>`],
     ['I paid a bill from the + button', `<p>When a bill is due within a week, <b>Paying a bill?</b> appears in the form. Tap the bill: the amount fills in and the bill is marked paid. No double counting.</p>`],
     ['Money I am waiting for (TA, arrears)', `<p><b>+ → Money in</b> → amount → tick <b>Not received yet</b> → Save. When it arrives, open it and tap <b>Receive</b>.</p>`]
   ]],
@@ -2216,7 +2460,10 @@ async function openEntry(id) {
     if (!xi.closed) { actions.push(`<button class="btn primary" data-act="payExpected" data-id="${e.id}">${e.direction === 'out' ? 'Pay' : 'Receive'}</button>`); minor.push(`<button class="link" data-act="closeExp" data-id="${e.id}">Mark done</button>`); }
     else if (e.closed) actions.push(`<button class="btn" data-act="reopenExp" data-id="${e.id}">Reopen</button>`);
   }
-  if (e.linkExpected) { const x = S.entries.find(y => y.id === e.linkExpected); if (x) dl('For expected', esc(entryTitle(x))); }
+  if (e.linkExpected) { const x = S.entries.find(y => y.id === e.linkExpected); if (x) dl(x.direction === 'out' ? 'For bill' : 'For expected', esc(entryTitle(x)) + ' · ' + monthLabel(x.date.slice(0, 7))); }
+  if (e.ref) dl('Reference no.', `${esc(e.ref)} <button class="link small" data-act="copyRef" data-v="${esc(e.ref)}">Copy</button>`);
+  if (e.txId) dl('Transaction ID', `${esc(e.txId)} <button class="link small" data-act="copyRef" data-v="${esc(e.txId)}">Copy</button>`);
+  if (e.units) dl('Units used', String(e.units) + (e.amount ? ' · ' + money(Math.round(e.amount / e.units * 10) / 10) + ' per unit' : ''));
   if (TYPES[e.type]) actions.push(`<button class="btn ${e.draft ? 'primary' : ''}" data-act="editEntry" data-id="${e.id}">${e.draft ? 'Complete' : 'Edit'}</button>`);
   minor.push(`<button class="link danger" data-act="deleteEntry" data-id="${e.id}">Delete</button>`);
   if (e.history && e.history.length) {
@@ -2830,6 +3077,40 @@ const ACT = {
     go('entries');
   },
   clearEF: () => { ui.entryFilter = null; render(); },
+  pasteSms: () => pasteSms(),
+  smsFromBox: () => { const t = $('#smsText').value; closeSheet(); openFromSms(t); },
+  smsDismiss: () => { form.sms = null; render(); },
+  smsAttach: async el => {
+    const x = S.entries.find(e => e.id === el.dataset.id); if (!x || !form.sms) return;
+    if (form.sms.txId) { x.txId = form.sms.txId; x.history = [...(x.history || []), { at: new Date().toISOString(), changes: { txId: ['', form.sms.txId] } }]; }
+    if (form.sms.digits && x.accountId) S.settings.acctDigits = { ...(S.settings.acctDigits || {}), [form.sms.digits]: x.accountId };
+    await save(); form.sms = null; setTab('home'); toast(form.txId ? 'Transaction ID added to the existing entry' : 'Kept the existing entry'); openEntry(x.id);
+  },
+  copyRef: async el => { const v = (el.dataset.v || '').replace(/\s+/g, ''); try { await navigator.clipboard.writeText(v); toast('Copied ' + v); } catch (e) { toast(v); } },
+  setBillAmt: el => {
+    const x = S.entries.find(e => e.id === el.dataset.id); if (!x) return;
+    openSheet(`${sheetHead('Amount on this bill')}<p class="muted small" style="margin-bottom:10px">${esc(entryTitle(x))} · ${monthLabel(x.date.slice(0, 7))}</p>
+      <div class="field"><label>Amount</label><input id="billAmt" inputmode="decimal" value="${x.estimated ? '' : x.amount}" placeholder="${x.amount}"></div>
+      <div class="field"><label>Due date</label><input type="date" id="billDue" value="${x.date}"></div>
+      <div class="btn-row mt"><button class="btn" data-act="closeSheet">Cancel</button><button class="btn primary" data-act="saveBillAmt" data-id="${x.id}">Save</button></div>`);
+    setTimeout(() => $('#billAmt')?.focus(), 60);
+  },
+  saveBillAmt: async el => {
+    const x = S.entries.find(e => e.id === el.dataset.id); if (!x) return;
+    const v = evalAmount($('#billAmt').value || ''), d = $('#billDue').value;
+    if (!(v > 0)) { toast('Enter the amount on the bill'); return; }
+    const ch = {}; if (v !== x.amount) ch.amount = [x.amount, v]; if (d && d !== x.date) ch.date = [x.date, d];
+    x.amount = v; if (d) x.date = d; x.estimated = false;
+    if (Object.keys(ch).length) x.history = [...(x.history || []), { at: new Date().toISOString(), changes: ch }];
+    await save(); closeSheet(); toast('Bill amount saved'); render();
+  },
+  efDrop: el => { const F = ui.entryFilter, k = el.dataset.k; F[k] = (k === 'drafts' || k === 'spentOnly') ? false : ''; if (k === 'drafts' && !F.month && !F.from) F.month = today().slice(0, 7); render(); },
+  efMonth: el => { if (el.disabled) return; const F = ui.entryFilter; F.month = shiftYm(F.month || today().slice(0, 7), Number(el.dataset.n)); render(); },
+  efAllTime: () => { const F = ui.entryFilter; F.month = ''; F.from = ''; F.to = ''; render(); },
+  efThisMonth: () => { const F = ui.entryFilter; F.month = today().slice(0, 7); F.from = ''; F.to = ''; render(); },
+  efSheet: () => openSheet(efSheetHtml()),
+  efSpent: el => { ui.entryFilter.spentOnly = el.checked; render(); },
+  efReset: () => { const F = ui.entryFilter; Object.assign(F, { type: '', book: '', person: '', work: '', cat: '', spentOnly: false }); openSheet(efSheetHtml()); render(); },
   seg: el => { ui.pendingSeg = el.dataset.seg; render(); },
   openEntry: el => openEntry(el.dataset.id),
   editEntry: el => editEntry(el.dataset.id),
@@ -3123,6 +3404,7 @@ document.addEventListener('input', e => {
   }
   if (t.dataset.ef) {
     ui.entryFilter[t.dataset.ef] = t.value;
+    if (t.dataset.efsheet) { render(); return; }
     const isText = t.dataset.ef === 'q';
     const pos = t.selectionStart;
     render();
@@ -3445,6 +3727,9 @@ async function init() {
   resetForm();
   drawKeypad();
   history.replaceState({ h: 0 }, '');
+  const qs = new URLSearchParams(location.search), shared = (qs.get('text') || qs.get('title')) ? [qs.get('title'), qs.get('text'), qs.get('url')].filter(Boolean).join(' ') : '';
+  if (shared) history.replaceState({ h: 0 }, '', location.pathname);
+  if (!qs.get('go') && !ar && !shared) restoreNav();
   render();
   let skip = false;
   try {
@@ -3454,6 +3739,7 @@ async function init() {
   } catch (e) { /* ignore */ }
   const goParam = new URLSearchParams(location.search).get('go');
   if (goParam && S.settings.onboarded && ['add', 'bills', 'people'].includes(goParam)) { history.replaceState({ h: 0 }, '', location.pathname); setTab(goParam); }
+  if (shared && S.settings.onboarded) openFromSms(shared);
   if (S.settings.pinHash && !skip) showLock();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});

@@ -43,7 +43,6 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - Bills: pick a bill type from the grid (Electricity, Gas, Water, Internet, Mobile, Rent, School fee, Committee…), name it (LESCO, Netflix), set how often (weekly to yearly) and the account you usually pay from. Tap Pay with the real amount; the next one is created automatically.
 - Bottom bar: Home, People, +, Bills, Insights. On Home, the top row has ☰ (menu with backup status, Budgets, Accounts, Backup, Preferences and other settings), the period switcher, and 🔥 (recording streak). "See full breakdown" under the Home summary opens Insights for the same period.
 - Home: spending for this week, last week, this month, a past month or custom dates (tap the period name). Cash and bank totals are under ☰ > Accounts.
-- Insights: own spending by category and area, categories above your usual, biggest expenses, last 6 months.
 - Budgets (☰ > Budgets): a monthly limit for all spending, and optional limits per category or area. The marker on each bar shows how far through the month you are. Home shows the overall budget; Needs attention warns at 90% and when over.
 - Streak (🔥 on Home, top right): days in a row with something recorded. Tap "Nothing spent today" on days without spending. Hollow dots are missed days: tap one to add that day's spending or mark it as nothing spent.
 - ☰ > Preferences: appearance (same as phone, light, dark), text size, currency symbol, number style.
@@ -54,6 +53,12 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - Home > Add again: the things you enter most often (fuel, milk…) appear automatically. One tap opens the form already filled; change the amount if needed and Save.
 - Insights has three tabs. Overview: spent with a pace line vs last month and a month-end projection, income/saved, budget ring, category donut (tap for entries), area tiles with change vs last month, paid with, bills, biggest expenses, month-by-month columns. Projects: one card per project/site with total, own vs to-be-repaid split, still to get back and cash with people. People: who owes you, whom you owe, spent on each person.
 - Adding a person: choose who they are (Family / relative, Friend, Spends money for me, Office / company (pays me back), Other). The short explanation under the choice shows what it means; it decides which option is pre-selected when you add money for them.
+
+## Bills and bank messages
+- Each bill has its own page (tap it in Bills): every month's amount, average, highest, lowest, last vs previous, units and cost per unit, late payments, and a month-by-month chart.
+- The next bill of a repeating bill is estimated (≈) from history: same month last year if known, else the average of the last 3. Enter the real amount when the bill arrives, or at Pay.
+- Reference / consumer no. on the bill with a Copy button; Transaction ID and units on each payment.
+- Share a bank SMS to Hisaab (or copy it and tap Paste bank SMS on Home): amount, date, name, account and Tx ID fill in; the same Tx ID is never added twice; an A/C number is matched to your account after the first time.
 
 ## Area
 - The Area line sits under the category on the add form. It fills itself from the category (Fuel → where you usually put fuel), never from your last entry, so one area can't silently leak into the next record. Change it in one tap; a hand-picked area is kept for "Save and add another".

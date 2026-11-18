@@ -1,6 +1,6 @@
 // Offline cache for the app shell. Bump VERSION after changing any file.
-const VERSION = 'hisaab-v34';
-const FILES = ['./', './index.html', './style.css?v=34', './config.js?v=34', './app.js?v=34', './manifest.json', './icon.svg?v=34', './icon-192.png?v=34', './icon-512.png?v=34', './fonts/inter-latin-400-normal.woff2', './fonts/inter-latin-600-normal.woff2', './fonts/inter-latin-700-normal.woff2'];
+const VERSION = 'hisaab-v35';
+const FILES = ['./', './index.html', './style.css?v=35', './config.js?v=35', './app.js?v=35', './manifest.json', './icon.svg?v=35', './icon-192.png?v=35', './icon-512.png?v=35', './fonts/inter-latin-400-normal.woff2', './fonts/inter-latin-600-normal.woff2', './fonts/inter-latin-700-normal.woff2'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
@@ -13,8 +13,8 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(
     fetch(e.request, { cache: 'no-cache' }).then(res => {
-      const copy = res.clone();
-      caches.open(VERSION).then(c => c.put(e.request, copy));
+      // don't keep shared bank messages (they arrive in the address) in the cache
+      if (!(e.request.mode === 'navigate' && new URL(e.request.url).search)) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
       return res;
     }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match('./index.html')))
   );
