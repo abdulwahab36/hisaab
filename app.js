@@ -682,8 +682,11 @@ VIEWS.home = () => {
   if (bud.length) { const r = bud[0]; alerts.push(`<button class="alert" data-act="go" data-v="budgets"><span class="grow"><b>${esc(r.label)} ${r.state === 'over' ? 'over budget' : 'budget ' + Math.round(r.pct * 100) + '% used'}</b> · ${r.state === 'over' ? money(-r.left) + ' over' : money(r.left) + ' left'}${bud.length > 1 ? ` · +${bud.length - 1} more` : ''}</span>›</button>`); }
   if (drafts.length) alerts.push(`<button class="alert info" data-act="goEntries" data-filter="draft"><span class="grow"><b>${drafts.length} incomplete</b> receipt${drafts.length > 1 ? 's' : ''} to fill in</span>›</button>`);
   const dv = S.settings.drive;
+  const dLast = dv.lastBackup ? dv.lastBackup.slice(0, 10) : '';
   if (dv.connected && dv.needsReconnect) {
-    alerts.push(`<button class="alert" data-act="driveReconnect"><span class="grow"><b>Google Drive backup paused</b> · tap to reconnect</span>›</button>`);
+    alerts.unshift(`<button class="alert" data-act="driveReconnect"><span class="grow"><b>Google Drive backup paused</b> · tap to reconnect</span>›</button>`);
+  } else if (dv.connected && S.settings.driveDirty && !S.settings.sample && (!dLast || daysBetween(dLast, t) >= 1)) {
+    alerts.unshift(`<button class="alert" data-act="driveNow"><span class="grow"><b>Changes not backed up</b> · ${dLast ? 'last backup ' + fmtShort(dLast) : 'not backed up yet'} · tap to back up now</span>›</button>`);
   } else {
     const lb = latestBackup();
     if (live().length >= 5 && (!lb || daysBetween(lb.slice(0, 10), t) > 7)) alerts.push(`<button class="alert" data-act="go" data-v="backup"><span class="grow"><b>Backup due</b> · ${lb ? 'last ' + fmtDate(lb.slice(0, 10)) : 'never backed up'}${dv.connected ? '' : ' · set up auto backup'}</span>›</button>`);
@@ -1657,76 +1660,281 @@ function insightTeaser(t) {
   return { text: top ? esc(catName(top[0])) : 'This month', sub: (top ? 'top category · ' : '') + (ch === null ? 'see breakdown' : (ch >= 0 ? '+' : '') + ch + '% vs last month so far') };
 }
 let insMonth = null;
-VIEWS.insights = () => {
-  const ym = insMonth || today().slice(0, 7);
-  const cur = spendMonth(ym), prev = spendMonth(shiftYm(ym, -1));
-  const past = [1, 2, 3].map(i => spendMonth(shiftYm(ym, -i)));
-  const avg = id => r2(past.reduce((a, m) => a + (m.byCat[id] || 0), 0) / 3);
-  const ch = prev.total ? Math.round((cur.total - prev.total) / prev.total * 100) : null;
-  const cats = Object.entries(cur.byCat).sort((a, b) => b[1] - a[1]);
-  const maxC = Math.max(1, ...cats.map(c => c[1]));
-  const catRows = cats.map(([id, v]) => {
-    const a = avg(id);
-    const tag = a === 0 ? (past.some(m => m.total) ? '<span class="badge partial">new</span>' : '') : v > a * 1.3 && v - a >= 500 ? `<span class="badge overdue">${Math.round((v - a) / a * 100)}% above usual</span>` : '';
-    return `<button class="bar-row" style="display:block;width:100%;text-align:left" data-act="insCat" data-c="${esc(id)}">
-      <div class="bar-top"><span>${esc(catName(id))} ${tag}</span><b>${money(v)}</b></div>
-      <div class="bar"><i style="width:${v / maxC * 100}%;background:${id.startsWith('_') ? 'var(--muted)' : 'var(--accent)'}"></i></div>
-      ${a ? `<div class="muted small">usual ${money(Math.round(a))} / month</div>` : ''}</button>`;
+// ---------------- Insights ----------------
+// Each block uses the chart form that fits its job: a line for pace over time,
+// a donut for share of the whole, tiles for a few areas, cards for projects,
+// columns for months. Colours follow the entity (fixed slot order), text stays in text colours.
+const IV_SLOTS = 5;
+function dailyOwn(ym) {
+  const dim = daysInMonth(ym), out = Array(dim).fill(0), [f, to] = monthBounds(ym);
+  const add = (d, v) => { const i = Number(d.slice(8, 10)) - 1; if (i >= 0 && i < dim) out[i] = r2(out[i] + v); };
+  for (const e of live()) {
+    if (e.type === 'expense' && e.date >= f && e.date <= to) add(e.date, e.amount);
+    if (e.type === 'recoverable' && e.writtenOff && e.writtenOff.date >= f && e.writtenOff.date <= to) add(e.writtenOff.date, e.writtenOff.amount);
+    if (e.type === 'adjustment' && e.amount < 0 && e.date >= f && e.date <= to) add(e.date, -e.amount);
+  }
+  let c = 0; return out.map(v => (c = r2(c + v)));
+}
+function shortMoney(v) {
+  const a = Math.abs(v), s = v < 0 ? '−' : '';
+  if (a >= 1e7) return s + (a / 1e7).toFixed(a >= 1e8 ? 0 : 1).replace(/\.0$/, '') + ' cr';
+  if (a >= 1e5) return s + (a / 1e5).toFixed(a >= 1e6 ? 0 : 1).replace(/\.0$/, '') + ' lac';
+  if (a >= 1e3) return s + (a / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'k';
+  return s + Math.round(a);
+}
+function ivPace(ym, curTotal) {
+  const isNow = ym === today().slice(0, 7), dim = daysInMonth(ym);
+  const cur = dailyOwn(ym), prevYm = shiftYm(ym, -1), prev = dailyOwn(prevYm);
+  const upto = isNow ? Number(today().slice(8, 10)) : dim;
+  const perDay = curTotal / Math.max(1, upto), proj = Math.round(perDay * dim);
+  const prevTot = prev[prev.length - 1] || 0;
+  const W = 320, H = 96, P = 4;
+  const max = Math.max(1, isNow ? proj : 0, curTotal, prevTot);
+  const x = d => P + (d - 1) / Math.max(1, dim - 1) * (W - 2 * P), y = v => H - P - v / max * (H - 2 * P);
+  const path = arr => arr.map((v, i) => `${i ? 'L' : 'M'}${x(i + 1).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  const prevPts = prev.slice(0, dim).concat(Array(Math.max(0, dim - prev.length)).fill(prevTot));
+  const curPts = cur.slice(0, upto);
+  const svg = `<svg class="iv-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Spending through the month"
+    data-cur="${curPts.join(',')}" data-prev="${prevPts.join(',')}" data-dim="${dim}" data-ym="${ym}" data-prevym="${prevYm}">
+    <line class="iv-base" x1="${P}" x2="${W - P}" y1="${H - P}" y2="${H - P}"/>
+    ${prevTot ? `<path class="iv-prev" d="${path(prevPts)}"/>` : ''}
+    ${isNow && upto < dim && curTotal ? `<path class="iv-proj" d="M${x(upto).toFixed(1)},${y(curTotal).toFixed(1)}L${x(dim).toFixed(1)},${y(proj).toFixed(1)}"/>` : ''}
+    ${curPts.length ? `<path class="iv-cur" d="${path(curPts)}" pathLength="1"/><circle class="iv-dot" cx="${x(upto).toFixed(1)}" cy="${y(curTotal).toFixed(1)}" r="4"/>` : ''}
+    <line class="iv-cross" x1="0" x2="0" y1="${P}" y2="${H - P}" style="display:none"/>
+  </svg>`;
+  const prevName = monthLabel(prevYm).split(' ')[0];
+  const legend = `<div class="iv-legend"><span><i class="k-cur"></i>${isNow ? 'This month' : monthLabel(ym).split(' ')[0]}</span>${prevTot ? `<span><i class="k-prev"></i>${esc(prevName)}</span>` : ''}${isNow && upto < dim && curTotal ? `<span><i class="k-proj"></i>At this pace</span>` : ''}</div>`;
+  return { svg, legend, perDay, proj, isNow, upto, dim, prevTot, prevName };
+}
+function ivDonut(slices, total) {
+  const R = 42, C = 2 * Math.PI * R, gap = slices.length > 1 ? 2.2 : 0;
+  let off = 0;
+  const arcs = slices.map(s => {
+    const len = Math.max(0, s.v / total * C - gap);
+    const a = `<circle r="${R}" cx="60" cy="60" class="iv-arc" style="stroke:${s.color}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" data-tip="${esc(s.name)}: ${esc(money(s.v))} (${Math.round(s.v / total * 100)}%)"/>`;
+    off += s.v / total * C; return a;
   }).join('');
-  const books = Object.entries(cur.byBook).sort((a, b) => b[1] - a[1]);
-  const maxB = Math.max(1, ...books.map(c => c[1]));
-  const [f, to] = monthBounds(ym);
-  const big = live().filter(e => e.type === 'expense' && e.date >= f && e.date <= to).sort((a, b) => b.amount - a.amount).slice(0, 5);
-  const months0 = [5, 4, 3, 2, 1, 0].map(i => { const m = shiftYm(ym, -i); return { m, v: spendMonth(m).total }; });
-  const firstUsed = months0.findIndex(x => x.v > 0), months = firstUsed < 0 ? [] : months0.slice(firstUsed);
-  const maxM = Math.max(1, ...months.map(x => x.v));
+  return `<svg class="iv-donut" viewBox="0 0 120 120" role="img" aria-label="Share of spending by category"><g transform="rotate(-90 60 60)">${arcs}</g>
+    <text x="60" y="57" class="iv-dc-v">${esc(shortMoney(total))}</text><text x="60" y="73" class="iv-dc-l">spent</text></svg>`;
+}
+function ivColumns(months, ym) {
+  const W = 320, H = 110, top = 18, bot = 18, n = months.length, bw = Math.min(34, (W - 16) / n - 10);
+  const max = Math.max(1, ...months.map(m => m.v)), avgv = months.reduce((a, m) => a + m.v, 0) / n;
+  const cx = i => 8 + (i + 0.5) * (W - 16) / n, hgt = v => v / max * (H - top - bot);
+  const bars = months.map((m, i) => {
+    const h = Math.max(m.v ? 3 : 0, hgt(m.v)), on = m.m === ym;
+    return `<g><rect x="${(cx(i) - bw / 2).toFixed(1)}" y="${(H - bot - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="4" class="iv-col ${on ? 'on' : ''}" data-tip="${esc(monthLabel(m.m))}: ${esc(money(m.v))}"/>
+      ${on ? `<text x="${cx(i).toFixed(1)}" y="${(H - bot - h - 5).toFixed(1)}" class="iv-col-v">${esc(shortMoney(m.v))}</text>` : ''}
+      <text x="${cx(i).toFixed(1)}" y="${H - 4}" class="iv-col-l ${on ? 'on' : ''}">${esc(monthLabel(m.m).slice(0, 3))}</text></g>`;
+  }).join('');
+  const ay = H - bot - hgt(avgv);
+  return `<svg class="iv-cols" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending by month">
+    <line class="iv-avg" x1="4" x2="${W - 4}" y1="${ay.toFixed(1)}" y2="${ay.toFixed(1)}"/>${bars}</svg>
+    <div class="iv-legend"><span><i class="k-avg"></i>Average ${esc(money(Math.round(avgv)))}</span></div>`;
+}
+const ivInitials = n => { const w = String(n || '').replace(/\([^)]*\)/g, ' ').split(/\s+/).filter(x => /^\p{L}/u.test(x)); return esc((w.slice(0, 2).map(x => x[0]).join('') || '?').toUpperCase()); };
+function ivTabs(tab) {
+  const t = (k, l) => `<button class="${tab === k ? 'on' : ''}" data-act="insTab" data-t="${k}" role="tab" aria-selected="${tab === k}">${l}</button>`;
+  return `<div class="iv-tabs" role="tablist">${t('overview', 'Overview')}${t('projects', 'Projects')}${t('people', 'People')}</div>`;
+}
+
+VIEWS.insights = () => {
+  const ym = insMonth || today().slice(0, 7), tab = ui.insTab || 'overview';
   const isNow = ym === today().slice(0, 7);
+  const head = `<div class="iv-month">
+    <button class="icon-btn" data-act="insMove" data-n="-1" aria-label="Previous month">‹</button>
+    <b>${monthLabel(ym)}</b>
+    <button class="icon-btn" data-act="insMove" data-n="1" aria-label="Next month" ${isNow ? 'disabled' : ''}>›</button></div>${ivTabs(tab)}`;
+  const body = tab === 'projects' ? ivProjects(ym) : tab === 'people' ? ivPeople(ym) : ivOverview(ym);
+  return head + `<div class="iv-body">${body}</div>`;
+};
+
+function ivOverview(ym) {
+  const cur = spendMonth(ym), prev = spendMonth(shiftYm(ym, -1));
+  const [f, to] = monthBounds(ym);
+  if (!cur.total && !incomeIn(f, to)) return `<div class="iv-empty"><b>Nothing spent in ${monthLabel(ym)}</b><p>Add a few expenses and this page shows where your money goes, how fast you are spending, and what is above your usual.</p><button class="btn primary" data-act="jump" data-tab="add">+ Add an expense</button></div>`;
+  const pace = ivPace(ym, cur.total);
+  // compare like with like: this month so far vs the same days last month
+  const prevSame = pace.isNow ? (dailyOwn(shiftYm(ym, -1))[Math.min(pace.upto, daysInMonth(shiftYm(ym, -1))) - 1] || 0) : prev.total;
+  const ch = prevSame ? Math.round((cur.total - prevSame) / prevSame * 100) : null;
   const inc = incomeIn(f, to), saved = r2(inc - cur.total), rate = inc ? Math.round(saved / inc * 100) : null;
-  const dim = daysInMonth(ym), daysSoFar = isNow ? Number(today().slice(8, 10)) : dim, perDay = cur.total / Math.max(1, daysSoFar), proj = Math.round(perDay * dim);
-  const pace = !cur.total ? '' : isNow
-    ? `You spend about <b>${money(Math.round(perDay))}</b> a day. At this pace this month ends near <b>${money(proj)}</b>${prev.total ? ` (last month ${money(prev.total)})` : ''}.`
-    : `About <b>${money(Math.round(perDay))}</b> a day${ch === null ? '' : `, ${ch === 0 ? 'same as' : Math.abs(ch) + '% ' + (ch > 0 ? 'more than' : 'less than')} ${monthLabel(shiftYm(ym, -1)).split(' ')[0]}`}.`;
+  const delta = ch === null ? '' : `<span class="iv-delta ${ch > 0 ? 'up' : ch < 0 ? 'down' : ''}">${ch > 0 ? '▲' : ch < 0 ? '▼' : '='} ${Math.abs(ch)}% <span>vs ${esc(pace.prevName)}${pace.isNow ? ' same days' : ''}</span></span>`;
+  const paceTxt = pace.isNow && pace.upto < pace.dim && cur.total
+    ? `At this pace the month ends near <b>${money(pace.proj)}</b>${pace.prevTot ? ` · ${esc(pace.prevName)} was ${money(pace.prevTot)}` : ''}${pace.upto < 7 ? ' <span class="muted">(rough this early)</span>' : ''}`
+    : '';
+  const hero = `<section class="iv-hero">
+    <div class="iv-hero-top"><span>Spent${pace.isNow ? ' so far' : ''}</span>${delta}</div>
+    <div class="iv-hero-amt">${money(cur.total)}</div>
+    ${pace.svg}${pace.legend}
+    ${paceTxt ? `<p class="iv-pace">${paceTxt}</p>` : ''}
+    <div class="iv-stats">
+      <div><span>Income</span><b class="${inc ? 'in' : ''}">${money(inc)}</b></div>
+      <div><span>Saved</span>${inc ? `<b class="${saved < 0 ? 'out' : ''}">${money(saved)}</b><small>${rate}% of income</small>` : `<b class="muted">—</b><small>add income to see</small>`}</div>
+      <div><span>Per day</span><b>${money(Math.round(pace.perDay))}</b></div>
+    </div></section>`;
+
+  // budget: a ring, not another bar
+  const bud = budgetRows(ym).rows, bt = bud.find(r => r.k === 'total'), over = bud.filter(r => r.state === 'over');
+  let budget = '';
+  if (bt || over.length) {
+    const pct = bt ? Math.min(1, bt.pct) : 1, R = 22, C = 2 * Math.PI * R;
+    budget = `<button class="iv-card iv-budget ${bt ? bt.state : 'over'}" data-act="go" data-v="budgets">
+      <svg viewBox="0 0 56 56" class="iv-ring" aria-hidden="true"><circle cx="28" cy="28" r="${R}" class="iv-ring-bg"/><circle cx="28" cy="28" r="${R}" class="iv-ring-fg" stroke-dasharray="${(pct * C).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 28 28)"/><text x="28" y="32">${bt ? Math.round(bt.pct * 100) + '%' : '!'}</text></svg>
+      <div class="grow"><b>${bt ? (bt.left >= 0 ? money(bt.left) + ' left' : money(-bt.left) + ' over budget') : 'Budget'}</b>
+      <div class="muted small">${bt ? money(bt.spent) + ' of ' + money(bt.budget) : ''}${over.length ? `${bt ? ' · ' : ''}<span class="danger">${over.map(r => esc(r.label)).slice(0, 2).join(', ')}${over.length > 2 ? ' +' + (over.length - 2) : ''} over</span>` : ''}</div></div><span class="chev">›</span></button>`;
+  }
+
+  // categories: donut + legend list (labels carry identity, not colour alone)
+  const past = [1, 2, 3].map(i => spendMonth(shiftYm(ym, -i)));
+  const usual = id => r2(past.reduce((a, m) => a + (m.byCat[id] || 0), 0) / 3);
+  const cats = Object.entries(cur.byCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const top = cats.slice(0, cats.length > IV_SLOTS + 1 ? IV_SLOTS : IV_SLOTS + 1);
+  const rest = cats.slice(top.length), restV = r2(rest.reduce((a, c) => a + c[1], 0));
+  const slices = top.map(([id, v], i) => ({ id, v, name: catName(id), color: id.startsWith('_') ? 'var(--c-other)' : `var(--c${(i % IV_SLOTS) + 1})` }));
+  if (restV) slices.push({ id: '_rest', v: restV, name: rest.length + ' more', color: 'var(--c-other)' });
+  const showAll = ui.insAllCats;
+  const catRow = (id, v, color) => {
+    const a = usual(id), pctv = Math.round(v / cur.total * 100);
+    const flag = a === 0 ? (past.some(m => m.total) ? '<span class="iv-flag new">new</span>' : '') : v > a * 1.3 && v - a >= 500 ? `<span class="iv-flag hot">${Math.round((v - a) / a * 100)}% above usual</span>` : '';
+    return `<button class="iv-row" data-act="insCat" data-c="${esc(id)}"><i class="iv-sw" style="background:${color}"></i>
+      <span class="grow"><span class="iv-rn">${esc(catName(id))}</span>${flag}${a ? `<span class="iv-sub">usual ${money(Math.round(a))}</span>` : ''}</span>
+      <span class="iv-rv"><b>${money(v)}</b><span>${pctv}%</span></span></button>`;
+  };
+  const catList = slices.map(s => s.id === '_rest'
+    ? (showAll ? rest.map(([id, v]) => catRow(id, v, 'var(--c-other)')).join('') + `<button class="iv-more" data-act="insAllCats">Show less</button>`
+      : `<button class="iv-row" data-act="insAllCats"><i class="iv-sw" style="background:var(--c-other)"></i><span class="grow"><span class="iv-rn">${rest.length} more ${rest.length === 1 ? 'category' : 'categories'}</span></span><span class="iv-rv"><b>${money(restV)}</b><span>${Math.round(restV / cur.total * 100)}%</span></span></button>`)
+    : catRow(s.id, s.v, s.color)).join('');
+  const where = cur.total ? `<section class="iv-card"><div class="iv-h">Where it went <span>tap to see entries</span></div>
+    <div class="iv-donut-wrap">${ivDonut(slices, cur.total)}</div><div class="iv-list">${catList}</div></section>` : '';
+
+  // areas: a few tiles, each with its change from last month
+  const books = Object.entries(cur.byBook).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const areas = books.length > 1 || (books.length === 1 && books[0][0] !== '_none') ? `<section class="iv-sec"><div class="iv-h">By area</div><div class="iv-tiles">${books.map(([id, v]) => {
+    const pv = prev.byBook[id] || 0, d = pv ? Math.round((v - pv) / pv * 100) : null;
+    return `<button class="iv-tile" data-act="insBook" data-b="${esc(id)}"><span class="iv-tl">${esc(id === '_none' ? 'No area' : id === '_unrec' ? 'Not recorded' : bookName(id))}</span><b>${money(v)}</b>
+      <span class="iv-tm"><span>${Math.round(v / cur.total * 100)}% of spent</span>${d === null ? '' : `<span class="${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '▲' : d < 0 ? '▼' : '='}${Math.abs(d)}%</span>`}</span></button>`;
+  }).join('')}</div></section>` : '';
+
+  // how you paid: short pills
   const how = {};
   for (const e of live()) if (e.type === 'expense' && e.date >= f && e.date <= to) { const k = e.viaPersonId ? '_p' : (e.accountId || '_n'); how[k] = r2((how[k] || 0) + e.amount); }
-  const howRows = Object.entries(how).sort((a, b) => b[1] - a[1]); const maxH = Math.max(1, ...howRows.map(x => x[1]));
-  const pbI = personBalances(); let owedI = 0, oweI = 0, nOwed = 0, nOwe = 0;
-  Object.values(pbI).forEach(v => { if (v > 0) { owedI = r2(owedI + v); nOwed++; } else if (v < 0) { oweI = r2(oweI - v); nOwe++; } });
+  const howRows = Object.entries(how).sort((a, b) => b[1] - a[1]);
+  const paid = howRows.length > 1 ? `<section class="iv-sec"><div class="iv-h">Paid with</div><div class="iv-pills">${howRows.map(([k, v]) => `<span class="iv-pill">${esc(k === '_p' ? 'Paid by others' : k === '_n' ? 'Before the app' : (acc(k)?.name || 'Account'))} <b>${money(v)}</b></span>`).join('')}</div></section>` : '';
+
+  // bills: two numbers side by side
   const bOpen = live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date >= f && e.date <= to);
-  const billIdsI = new Set(S.entries.filter(e => e.type === 'expected' && e.direction === 'out').map(e => e.id));
-  const bPaid = r2(live().filter(e => e.linkExpected && billIdsI.has(e.linkExpected) && e.date >= f && e.date <= to).reduce((a, e) => a + e.amount, 0));
+  const billIds = new Set(S.entries.filter(e => e.type === 'expected' && e.direction === 'out').map(e => e.id));
+  const bPaid = r2(live().filter(e => e.linkExpected && billIds.has(e.linkExpected) && e.date >= f && e.date <= to).reduce((a, e) => a + e.amount, 0));
   const bLeft = r2(bOpen.reduce((a, e) => a + expectedInfo(e).rem, 0));
-  const bud = budgetRows(ym).rows, budT = bud.find(r => r.k === 'total'), budOver = bud.filter(r => r.state === 'over').length;
-  return `<div class="row" style="margin-bottom:12px">
-    <button class="btn sm" data-act="insMove" data-n="-1">‹</button>
-    <div class="grow" style="text-align:center;font-weight:650">${monthLabel(ym)}</div>
-    <button class="btn sm" data-act="insMove" data-n="1" ${isNow ? 'disabled' : ''}>›</button>
-  </div>
-  <div class="ins3">
-    <div><span>Income</span><b class="in">${money(inc)}</b></div>
-    <div><span>Spent</span><b>${money(cur.total)}</b></div>
-    <div><span>Saved</span><b class="${saved < 0 ? 'out' : ''}">${money(saved)}</b><small>${rate === null ? '' : rate + '% of income'}</small></div>
-  </div>
-  ${pace ? `<p class="pace">${pace}</p>` : ''}
-  ${budT || budOver ? `<button class="bud ${budT ? budT.state : ''}" data-act="go" data-v="budgets" style="margin-top:4px">
-    <div class="bud-top"><span class="grow">Budget</span>${budT ? `<b>${money(budT.spent)}</b><span class="muted small">&nbsp;of ${money(budT.budget)}</span>` : ''}</div>
-    ${budT ? `<div class="bar"><i style="width:${Math.min(100, budT.pct * 100)}%"></i></div>` : ''}
-    <div class="bud-sub">${budT ? (budT.left >= 0 ? money(budT.left) + ' left' : money(-budT.left) + ' over') : ''}${budOver ? `${budT ? ' · ' : ''}<span class="danger">${budOver} budget${budOver > 1 ? 's' : ''} over</span>` : ''} ›</div></button>` : ''}
-  <div class="sec-title">By category <span class="muted" style="text-transform:none;font-weight:400">tap to see entries</span></div>
-  <div class="card">${catRows || '<div class="muted small">No own spending in this month.</div>'}</div>
-  <div class="sec-title">By area</div>
-  <div class="card">${books.length ? books.map(([id, v]) => `<div class="bar-row"><div class="bar-top"><span>${esc(bookName(id))}</span><b>${money(v)}</b></div><div class="bar"><i style="width:${v / maxB * 100}%"></i></div></div>`).join('') : '<div class="muted small">Nothing yet.</div>'}</div>
-  ${(() => { const so = Object.entries(spentOnTotals(ym + '-01', ym + '-31')).filter(([id]) => person(id)).sort((a, b) => b[1] - a[1]); if (!so.length) return ''; const mx = so[0][1];
-    return `<div class="sec-title">Spent on people <span class="muted" style="text-transform:none;font-weight:400">not owed back</span></div><div class="card">${so.map(([id, v]) => `<button class="bar-row" style="display:block;width:100%;text-align:left" data-act="spentOnList" data-p="${id}" data-ym="${ym}"><div class="bar-top"><span>${esc(person(id).name)}</span><b>${money(v)}</b></div><div class="bar"><i style="width:${v / mx * 100}%"></i></div></button>`).join('')}</div>`; })()}
-  ${howRows.length ? `<div class="sec-title">How you paid</div><div class="card">${howRows.map(([k, v]) => `<div class="bar-row"><div class="bar-top"><span>${k === '_p' ? 'Paid by others (you owe them)' : k === '_n' ? 'Before the app' : esc(acc(k)?.name || 'Account')}</span><b>${money(v)}</b></div><div class="bar"><i style="width:${v / maxH * 100}%"></i></div></div>`).join('')}</div>` : ''}
-  ${bOpen.length || bPaid ? `<div class="sec-title">Bills this month <button data-act="jump" data-tab="bills">Open ›</button></div><div class="kvs"><div class="kv"><span>Paid</span><b>${money(bPaid)}</b></div><div class="kv"><span>Still to pay</span><b class="${bLeft ? 'out' : ''}">${money(bLeft)}</b></div></div>` : ''}
-  ${owedI || oweI ? `<div class="sec-title">Money with people <button data-act="jump" data-tab="people">Open ›</button></div><div class="kvs"><div class="kv"><span>To get back · ${nOwed} ${nOwed === 1 ? 'person' : 'people'}</span><b class="in">${money(owedI)}</b></div><div class="kv"><span>You owe · ${nOwe} ${nOwe === 1 ? 'person' : 'people'}</span><b class="${oweI ? 'out' : ''}">${money(oweI)}</b></div></div><p class="muted small" style="margin:6px 2px 0">Not counted in Spent, because it comes back or is a loan.</p>` : ''}
-  <div class="sec-title">Biggest expenses</div>
-  <div class="card flush">${big.length ? big.map(e => entryItem(e)).join('') : '<div class="empty">None.</div>'}</div>
-  ${months.filter(x => x.v).length < 2 ? '' : `<div class="sec-title">Last 6 months</div>
-  <div class="card">${months.map(x => `<div class="bar-row"><div class="bar-top"><span>${monthLabel(x.m)}</span><b>${money(x.v)}</b></div><div class="bar"><i style="width:${x.v / maxM * 100}%"></i></div></div>`).join('')}</div>`}
-  ${cur.total ? '' : '<p class="muted small mt">Add a few expenses and this page shows where your money goes, by category and area, and what is above your usual.</p>'}
-  <p class="muted small mt">Only your own money: expenses, amounts you won't get back, and gaps found by Fix balance. Office money you will get back, loans and transfers are not counted.</p>`;
-};
+  const bills = bOpen.length || bPaid ? `<button class="iv-card iv-pair" data-act="jump" data-tab="bills"><div><span>Bills paid</span><b>${money(bPaid)}</b></div><div><span>Bills still to pay</span><b class="${bLeft ? 'out' : ''}">${money(bLeft)}</b>${bOpen.length ? `<small>${bOpen.length} open</small>` : ''}</div><span class="chev">›</span></button>` : '';
+
+  const big = live().filter(e => e.type === 'expense' && e.date >= f && e.date <= to).sort((a, b) => b.amount - a.amount).slice(0, 3);
+  const bigH = big.length ? `<section class="iv-sec"><div class="iv-h">Biggest expenses</div><div class="card flush">${big.map(e => entryItem(e)).join('')}</div></section>` : '';
+
+  const months0 = [5, 4, 3, 2, 1, 0].map(i => { const m = shiftYm(ym, -i); return { m, v: spendMonth(m).total }; });
+  const first = months0.findIndex(x => x.v > 0), months = first < 0 ? [] : months0.slice(first);
+  const trend = months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, ym)}</section>` : '';
+
+  return hero + budget + where + areas + paid + bills + bigH + trend +
+    `<p class="iv-foot">Counts only your own money. Office money you will get back, loans and transfers are kept out, so they are on the Projects and People tabs.</p>`;
+}
+
+function ivProjects(ym) {
+  const [f, to] = monthBounds(ym);
+  if (!S.works.length) return `<div class="iv-empty"><b>Track a project, site or event</b><p>Group everything for one job, such as a building repair, a wedding or a site, and see what it cost, what the office still owes you and how much cash is still with your people.</p><button class="btn primary" data-act="editWork">+ Add a project / site</button></div>`;
+  const rows = S.works.map(w => {
+    const st = workStats(w.id), ents = st.entries;
+    const month = r2(ents.filter(e => (e.type === 'expense' || e.type === 'recoverable') && e.date >= f && e.date <= to).reduce((a, e) => a + e.amount, 0));
+    const last = ents.reduce((a, e) => (e.date > a ? e.date : a), '');
+    const withPeople = Math.max(0, r2(st.adv - st.viaStaff));
+    const byCat = {};
+    for (const e of ents) if (e.type === 'expense' || e.type === 'recoverable') byCat[e.categoryId || '_none'] = r2((byCat[e.categoryId || '_none'] || 0) + e.amount);
+    const topCats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id]) => catName(id));
+    return { w, st, month, last, withPeople, topCats };
+  }).sort((a, b) => (a.w.closed - b.w.closed) || (b.last > a.last ? 1 : b.last < a.last ? -1 : 0));
+  const open = rows.filter(r => !r.w.closed), closed = rows.filter(r => r.w.closed);
+  const tot = r2(open.reduce((a, r) => a + r.st.total, 0)), pend = r2(open.reduce((a, r) => a + r.st.recPending, 0)), held = r2(open.reduce((a, r) => a + r.withPeople, 0));
+  const card = r => {
+    const { w, st } = r, total = st.total || 0;
+    const ownPct = total ? st.own / total * 100 : 0;
+    return `<button class="iv-proj ${w.closed ? 'closed' : ''}" data-act="go" data-v="work" data-p="${w.id}">
+      <div class="iv-pt"><b>${esc(w.name)}</b>${w.closed ? '<span class="iv-flag">closed</span>' : ''}<span class="chev">›</span></div>
+      <div class="iv-ps">${[w.ref ? esc(w.ref) : '', r.last ? 'last entry ' + fmtShort(r.last) : 'no entries yet', st.entries.length ? st.entries.length + ' entr' + (st.entries.length === 1 ? 'y' : 'ies') : ''].filter(Boolean).join(' · ')}</div>
+      <div class="iv-pa">${money(total)}<span>spent so far</span></div>
+      ${total ? `<div class="iv-split" aria-hidden="true">${st.own ? `<i class="own" style="width:${ownPct}%"></i>` : ''}${st.rec ? `<i class="rec" style="width:${100 - ownPct}%"></i>` : ''}</div>
+      <div class="iv-legend">${st.own ? `<span><i class="k-own"></i>My own ${money(st.own)}</span>` : ''}${st.rec ? `<span><i class="k-rec"></i>To be repaid ${money(st.rec)}</span>` : ''}</div>` : ''}
+      <div class="iv-facts">
+        <div><span>${monthLabel(ym).split(' ')[0]}</span><b>${money(r.month)}</b></div>
+        <div><span>Still to get back</span><b class="${st.recPending ? 'in' : ''}">${money(st.recPending)}</b></div>
+        <div><span>Cash with people</span><b class="${r.withPeople ? 'warn' : ''}">${money(r.withPeople)}</b></div>
+      </div>
+      ${r.topCats.length ? `<div class="iv-ps">Mostly ${r.topCats.map(esc).join(', ')}</div>` : ''}</button>`;
+  };
+  return `<div class="iv-sum3">
+      <div><span>Open projects</span><b>${open.length}</b></div>
+      <div><span>Spent on them</span><b>${money(tot)}</b></div>
+      <div><span>To get back</span><b class="${pend ? 'in' : ''}">${money(pend)}</b></div></div>
+    ${held ? `<p class="iv-pace">Cash still with your people for these projects: <b>${money(held)}</b>. Ask them for bills or the change.</p>` : ''}
+    ${open.map(card).join('') || '<div class="muted small">All projects are closed.</div>'}
+    ${closed.length ? (ui.insClosed ? `<div class="iv-h">Closed</div>${closed.map(card).join('')}<button class="iv-more" data-act="insClosed">Hide closed</button>` : `<button class="iv-more" data-act="insClosed">Show ${closed.length} closed project${closed.length > 1 ? 's' : ''}</button>`) : ''}
+    <button class="btn block mt" data-act="editWork">+ Add a project / site</button>`;
+}
+
+function ivPeople(ym) {
+  const [f, to] = monthBounds(ym);
+  const pb = personBalances();
+  const owed = Object.entries(pb).filter(([id, v]) => v > 0 && person(id)).sort((a, b) => b[1] - a[1]);
+  const owe = Object.entries(pb).filter(([id, v]) => v < 0 && person(id)).sort((a, b) => a[1] - b[1]);
+  const so = Object.entries(spentOnTotals(f, to)).filter(([id]) => person(id)).sort((a, b) => b[1] - a[1]);
+  if (!owed.length && !owe.length && !so.length) return `<div class="iv-empty"><b>No money with people yet</b><p>When you lend, borrow, give money to someone to spend for you, or pay for family, it shows here: who owes you, whom you owe, and what you spent on each person.</p><button class="btn primary" data-act="jump" data-tab="people">Open People</button></div>`;
+  const sum = l => r2(l.reduce((a, [, v]) => a + Math.abs(v), 0));
+  const who = (list, cls) => list.slice(0, 4).map(([id, v]) => `<button class="iv-person" data-act="go" data-v="person" data-p="${id}"><span class="iv-av ${cls}">${ivInitials(person(id).name)}</span><span class="grow">${esc(person(id).name)}</span><b class="${cls}">${money(Math.abs(v))}</b></button>`).join('')
+    + (list.length > 4 ? `<button class="iv-more" data-act="jump" data-tab="people">+ ${list.length - 4} more</button>` : '');
+  const soMax = so.length ? so[0][1] : 1, soTot = sum(so);
+  return `<div class="iv-pair2">
+      ${owed.length ? `<section class="iv-card"><div class="iv-h">They owe you</div><div class="iv-big in">${money(sum(owed))}</div>${who(owed, 'in')}</section>` : ''}
+      ${owe.length ? `<section class="iv-card"><div class="iv-h">You owe</div><div class="iv-big out">${money(sum(owe))}</div>${who(owe, 'out')}</section>` : ''}
+      ${!owed.length || !owe.length ? `<div class="iv-pill iv-none">${!owed.length ? 'Nobody owes you' : 'You owe nobody'}${!owed.length && !owe.length ? ', and you owe nobody' : ''}</div>` : ''}
+    </div>
+    ${so.length ? `<section class="iv-card"><div class="iv-h">Spent on people in ${monthLabel(ym).split(' ')[0]} <span>not paid back</span></div>
+      <div class="iv-big">${money(soTot)}</div>
+      ${so.map(([id, v]) => `<button class="iv-person" data-act="spentOnList" data-p="${id}" data-ym="${ym}"><span class="iv-av">${ivInitials(person(id).name)}</span>
+        <span class="grow"><span class="iv-rn">${esc(person(id).name)}</span><span class="iv-meter"><i style="width:${(v / soMax * 100).toFixed(1)}%"></i></span></span><b>${money(v)}</b></button>`).join('')}</section>` : ''}
+    <p class="iv-foot">Loans and money given to spend are not counted as your spending. Spending on family that is not paid back is.</p>`;
+}
+
+// One tooltip for every chart: per-mark tips, and a crosshair on the pace line.
+(function ivTooltip() {
+  let tip;
+  const show = (html, cx, cy) => {
+    if (!tip) { tip = document.createElement('div'); tip.className = 'iv-tip'; document.body.appendChild(tip); }
+    tip.innerHTML = html; tip.hidden = false;
+    const w = tip.offsetWidth, x = Math.min(window.innerWidth - w - 8, Math.max(8, cx - w / 2));
+    tip.style.left = x + 'px'; tip.style.top = Math.max(8, cy - tip.offsetHeight - 14) + 'px';
+  };
+  const hide = () => { if (tip) tip.hidden = true; document.querySelectorAll('.iv-spark .iv-cross').forEach(l => (l.style.display = 'none')); };
+  const move = ev => {
+    const t = ev.target;
+    const mark = t.closest && t.closest('[data-tip]');
+    if (mark && mark.closest('.iv-body')) { show(esc(mark.dataset.tip), ev.clientX, ev.clientY); return; }
+    const sp = t.closest && t.closest('.iv-spark');
+    if (sp) {
+      const r = sp.getBoundingClientRect(), dim = Number(sp.dataset.dim), cur = sp.dataset.cur ? sp.dataset.cur.split(',').map(Number) : [], prev = sp.dataset.prev ? sp.dataset.prev.split(',').map(Number) : [];
+      const d = Math.min(dim, Math.max(1, Math.round((ev.clientX - r.left) / r.width * (dim - 1)) + 1));
+      const cross = sp.querySelector('.iv-cross'), px = 4 + (d - 1) / Math.max(1, dim - 1) * 312;
+      cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.style.display = '';
+      const lines = [`<b>Day ${d}</b>`];
+      if (d <= cur.length) lines.push(`${esc(monthLabel(sp.dataset.ym).split(' ')[0])}: ${esc(money(cur[d - 1]))}`);
+      if (prev.length && prev.some(v => v)) lines.push(`${esc(monthLabel(sp.dataset.prevym).split(' ')[0])}: ${esc(money(prev[d - 1] || 0))}`);
+      show(lines.join('<br>'), ev.clientX, r.top);
+      return;
+    }
+    hide();
+  };
+  document.addEventListener('pointermove', move, { passive: true });
+  document.addEventListener('pointerdown', move, { passive: true });
+  document.addEventListener('scroll', hide, { passive: true, capture: true });
+})();
 
 // ---------------- Welcome (first run) ----------------
 let wiz = null;
@@ -1900,7 +2108,7 @@ const HELP = [
   ['Seeing where money went', [
     ['Spending for a week, month or custom dates', `<p>On Home tap the period name (<b>This month ▾</b>) → This week, Last week, Last month, a past month or Custom dates. Use ‹ › to step back and forward.</p>`],
     ['Totals by area, category and person', `<p>Home shows the area totals under Spent. Tap <b>See full breakdown</b> (or the Insights tab) for the full picture.</p>`],
-    ['What Insights shows', `<p><b>Income, Spent, Saved</b> for the period, with the share of income saved.<br><b>Pace</b>: your daily average and where the month will end if you keep spending like this (rough in the first week).<br><b>Budget</b> used, <b>categories</b>, <b>areas</b> and <b>Spent on people</b>.<br><b>How you paid</b>: cash, bank, or paid by others.<br><b>Bills</b>: paid and still to pay this month.<br><b>Money with people</b>: what you will get back and what you owe.<br><b>Biggest expenses</b> and the <b>last 6 months</b> side by side.</p>`],
+    ['What Insights shows', `<p>Three tabs. Swipe months with ‹ ›.</p><p><b>Overview</b>: how much you spent, a line showing your pace through the month against last month, where the month will end, income and saved, budget, a ring of categories (tap one for its entries), areas with their change from last month, bills, biggest expenses and month by month.<br><b>Projects</b>: each project or site with what it cost, your own share vs what will be repaid, what is still to get back, and cash still with your people.<br><b>People</b>: who owes you, whom you owe, and what you spent on each person.</p><p class="ex">Tip: touch any chart to see the exact amount.</p>`],
     ['Add again on Home', `<p>Things you enter often (fuel, milk, a weekly payment) appear on Home under <b>Add again</b> after you have entered them twice. Tap one: the form opens filled with the last amount. Change the amount if needed and Save.</p>`],
     ['Set a budget', `<p><b>☰ → Budgets</b> → <b>Set a monthly budget</b> for all spending, or <b>+ Budget for a category or area</b> (e.g. Fuel Rs 8,000). The line on each bar shows how far through the month you are: if the bar passes it, you are spending too fast.</p>`],
     ['What is the 🔥 streak?', `<p>Days in a row with something recorded. On a day with no spending tap <b>Nothing spent today</b>. Hollow dots are missed days: tap one to fill it in.</p>`]
@@ -1912,7 +2120,7 @@ const HELP = [
   ]],
   ['Keeping your data safe', [
     ['Where is my data kept?', `<p>On this phone, inside the browser you opened Hisaab with. Another browser, another phone, or an Incognito tab starts empty. Clearing Chrome's "site data" erases it. That's why backup matters.</p>`],
-    ['Turn on automatic backup', `<p><b>☰ → Backup &amp; restore → Google Drive</b>. After that every change is saved to the "Hisaab Backups" folder in your Drive. The ☰ menu shows "Backed up today" when it's working.</p>`],
+    ['Turn on automatic backup', `<p><b>☰ → Backup &amp; restore → Google Drive</b>. After that every change is saved to the "Hisaab Backups" folder in your Drive. The ☰ menu shows "Backed up today" when it's working.</p><p>Drive keeps one file per day for the last 15 days, so you can go back to an earlier day. Backup runs while the app is open; changes made offline are sent the next time you open it online. If changes wait more than a day, Home shows <b>Changes not backed up</b>: tap it. If Google asks you to sign in again, Home shows <b>Backup paused</b>: tap it once.</p>`],
     ['I see the Welcome screen and my entries are gone', `<p>Don't enter new balances yet. First, open Hisaab the same way as before (same icon, same browser, same link). If it's still empty, on the Welcome screen tap <b>Restore from backup</b> and choose Google Drive or your backup file.</p>`],
     ['Lock the app with a PIN', `<p><b>☰ → App lock</b> → set a 4-digit PIN. <b>☰ → Lock now</b> locks it straight away.</p>`]
   ]],
@@ -2628,7 +2836,15 @@ const ACT = {
   deleteEntry: el => deleteEntry(el.dataset.id),
   closeSheet: () => closeSheet(),
   confirmOk: () => { const r = confirmBox._res; confirmBox._res = null; closeSheet(); if (r) r(true); },
-  openInsights: () => { go('insights'); insMonth = insYm(); render(); },
+  openInsights: () => { ui.insTab = 'overview'; go('insights'); insMonth = insYm(); render(); },
+  insTab: el => { ui.insTab = el.dataset.t; ui.insAllCats = false; render(); window.scrollTo(0, 0); },
+  insAllCats: () => { ui.insAllCats = !ui.insAllCats; render(); },
+  insClosed: () => { ui.insClosed = !ui.insClosed; render(); },
+  insBook: el => {
+    const ym = insMonth || today().slice(0, 7), b = el.dataset.b;
+    ui.entryFilter = { month: ym, type: '', book: b.startsWith('_') ? '' : b, person: '', work: '', q: '', drafts: false, spentOnly: true };
+    go('entries');
+  },
   perStep: el => {
     const P = curPeriod(), d = +el.dataset.d, t = today();
     if (P.k === 'week') { const ns = addDays(P.start, 7 * d); if (ns <= weekStart(t)) P.start = ns; }

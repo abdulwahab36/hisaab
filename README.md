@@ -52,7 +52,7 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 
 ## Home and Insights
 - Home > Add again: the things you enter most often (fuel, milk…) appear automatically. One tap opens the form already filled; change the amount if needed and Save.
-- Insights: Income, Spent and Saved for the month; your daily average and where the month will end at this pace; budget; categories and areas; Spent on people; how you paid (cash, bank, paid by others); bills paid and still to pay; money with people; biggest expenses; months side by side.
+- Insights has three tabs. Overview: spent with a pace line vs last month and a month-end projection, income/saved, budget ring, category donut (tap for entries), area tiles with change vs last month, paid with, bills, biggest expenses, month-by-month columns. Projects: one card per project/site with total, own vs to-be-repaid split, still to get back and cash with people. People: who owes you, whom you owe, spent on each person.
 - Adding a person: choose who they are (Family / relative, Friend, Spends money for me, Office / company (pays me back), Other). The short explanation under the choice shows what it means; it decides which option is pre-selected when you add money for them.
 
 ## Area
