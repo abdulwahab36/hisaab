@@ -434,6 +434,7 @@ function entrySub(e) {
 const STATUS_LBL = { pending: 'not back yet', partial: 'part back', recovered: 'paid back', 'written-off': 'written off' };
 const TYPE_ICO = { lent: '↗', advance: '↗', repaid: '↗', received: '↙', borrowed: '↙', transfer: '⇄', recovery: '↩', adjustment: '=', income: '+', expense: '•', recoverable: '↻', expected: '◷' };
 const ICON_PATHS = {
+  pencil: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
   basket: 'M5 10h14l-1.6 9H6.6z M8.5 10L12 4.5 15.5 10',
   fork: 'M7 3v18 M4.5 3v5a2.5 2.5 0 0 0 5 0V3 M17 21V3c-2.2 1.2-3.5 4-3.5 7.5H17',
   fuel: 'M4 21V5a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v16 M3 21h11 M6.5 8h4 M13 9h2a2 2 0 0 1 2 2v5a1.5 1.5 0 0 0 3 0V8l-3-3',
@@ -555,7 +556,7 @@ window.addEventListener('popstate', () => {
 const TITLES = {
   welcome: 'Hisaab',
   home: 'Hisaab', people: 'People', add: 'Add entry', pending: 'Pending', more: 'More',
-  person: 'Person', accounts: 'Accounts', books: 'Areas', cats: 'Categories', works: 'Projects / sites', work: 'Project',
+  person: 'Person', accounts: 'Accounts', books: 'Areas', cats: 'Categories', works: 'Projects', work: 'Project',
   templates: 'Quick templates', prefs: 'Preferences', budgets: 'Budgets', bills: 'Bills', insights: 'Insights', entries: 'All entries', backup: 'Backup & restore', security: 'App lock', help: 'How to use Hisaab'
 };
 
@@ -578,11 +579,10 @@ function render() {
   else if (cur.v === 'welcome') cur = { v: 'home', p: null };
   $$('.nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   $('#backBtn').hidden = stack.length === 0;
-  $('#lockBtn').hidden = !S.settings.pinHash;
   let title = TITLES[cur.v] || 'Hisaab';
   if (cur.v === 'person') title = '';
   if (cur.v === 'pending') title = ui.pendingSeg === 'exp' ? 'Upcoming' : 'To get back';
-  if (cur.v === 'work') title = work(cur.p)?.name || 'Work';
+  if (cur.v === 'work') title = work(cur.p)?.name || 'Project';
   if (cur.v === 'bill') { const b = billSeries(cur.p).at(-1); title = b ? entryTitle(b) : 'Bill'; }
   if (cur.v === 'add' && form.editingId) title = form.draftId ? 'Complete entry' : 'Edit entry';
   if (cur.v === 'add' && form.type === 'expected' && form.direction === 'out') title = form.editingId ? 'Edit bill' : 'Add bill';
@@ -871,17 +871,16 @@ VIEWS.person = (pid) => {
   <div class="phero">
     ${personAvatar(p).replace('ico av', 'ico av lg')}
     <div class="grow"><h2>${esc(p.name)}</h2><div class="muted small">${esc(PERSON_KINDS[p.kind] || '')}${p.phone ? ' · ' + esc(p.phone) : ''}</div></div>
-    <button class="link small" data-act="editPerson" data-id="${pid}">Edit</button>
+    <div class="phead-acts">${lines.length ? `<button class="link small" data-act="sharePerson" data-p="${pid}">Share</button>` : ''}<button class="link small" data-act="editPerson" data-id="${pid}">Edit</button></div>
   </div>
   <div class="pbal">${balLine}</div>
   ${(() => { const ym = today().slice(0, 7), m = spentOnTotals(ym + '-01', ym + '-31')[pid] || 0, y = spentOnTotals(ym.slice(0, 4) + '-01-01', ym.slice(0, 4) + '-12-31')[pid] || 0;
     return y ? `<button class="spenton" data-act="spentOnList" data-p="${pid}" data-ym="${ym}"><span>Spent on ${esc(p.name)}</span><b>${money(m)}</b><span class="muted small">this month · ${money(y)} this year ›</span></button>` : ''; })()}
   ${dueTag(p, bal) ? `<div class="small muted" style="margin:-6px 0 10px">${dueTag(p, bal)} <button class="link small" data-act="editPerson" data-id="${pid}">change</button></div>` : ''}
-  <div class="pills">
+  <div class="pills pfit">
     ${bal ? `<button class="pill primary" data-act="settleUp" data-p="${pid}">Settle up</button>` : ''}
     <button class="pill gave" data-act="personMoney" data-dir="out" data-p="${pid}"><span class="out">−</span> I gave / paid</button>
     <button class="pill got" data-act="personMoney" data-dir="in" data-p="${pid}"><span class="in">+</span> I received</button>
-    ${lines.length ? `<button class="pill" data-act="sharePerson" data-p="${pid}">Share</button>` : ''}
   </div>
   ${openRec.length ? `<div class="sec-title">To get back <button data-act="recoverForPerson" data-p="${pid}">They paid back</button></div>
   <div class="list">${openRec.sort(sortDesc).map(e => entryItem(e, { owed: true })).join('')}</div>` : ''}
@@ -1075,6 +1074,10 @@ VIEWS.add = () => {
     parts.push(`<div class="field"><label>Bill type</label><div class="tgrid">${cats.map(c => `<button type="button" class="tile2 cat ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}">${svgIcon(catIcon(c.name))}<span>${esc(c.name)}</span></button>`).join('')}${BILL_SUG.filter(n => !have.has(n.toLowerCase())).map(n => `<button type="button" class="tile2" data-act="pickBillSug" data-name="${n}">${svgIcon(catIcon(n))}<span>${n}</span></button>`).join('')}<button type="button" class="tile2 ghost" data-act="editSimple" data-kind="catbill" data-fromform="1">${svgIcon('plus')}<span>Other…</span></button></div></div>`);
   } else if (showCat) parts.push(`<div class="field"><label>Category</label><div class="chips">${cats.map(c => `<button type="button" class="chip cat ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}">${svgIcon(catIcon(c.name))}${esc(c.name)}</button>`).join('')}<button type="button" class="chip ghost" data-act="editSimple" data-kind="${catKind === 'in' ? 'catin' : 'catout'}" data-fromform="1">+ New</button></div></div>`);
   if (showBook && S.books.length) parts.push(`<label class="arealine"><span>Area</span><select class="inp" data-f="bookId" aria-label="Area">${opt(S.books, f.bookId, 'None')}</select></label>`);
+  // Project: its own visible line once you have an open project (always starts at None, never copied from the last entry)
+  const openWorks = S.works.filter(w => !w.closed || w.id === f.workId);
+  const projLine = has('work') && openWorks.length > 0 && !(f.type === 'lent' && !f.workId && person(f.personId)?.kind !== 'staff');
+  if (projLine) parts.push(`<label class="arealine"><span>Project</span><select class="inp" data-f="workId" aria-label="Project">${opt(openWorks, f.workId, 'None')}<option value="__new">+ New project…</option></select></label>`);
   if (laterHtml) parts.push(laterHtml);
   if (f.type === 'expense' && !f.forId && !f.linkExpected && !f.editingId) {
     const t1 = today(), lim = addDays(t1, 7);
@@ -1124,7 +1127,7 @@ VIEWS.add = () => {
   // --- more details
   if (has('due')) extra.push(`<div class="field"><label>${f.type === 'received' ? 'Rest promised by' : 'Return by'} (optional)</label><input type="date" data-f="dueDate" value="${esc(f.dueDate)}"></div>`);
   if (has('personOpt') && !billMode) extra.push(`<div class="field"><label>From / to (optional)</label><select data-f="personId">${opt(S.people, f.personId, 'None')}</select></div>`);
-  if (has('work') && (f.type !== 'lent' || f.workId || person(f.personId)?.kind === 'staff')) extra.push(`<div class="field"><label>Project / site (optional)</label><div class="row"><select class="inp grow" data-f="workId">${opt(S.works.filter(w => !w.closed || w.id === f.workId), f.workId, 'None')}</select><button type="button" class="btn sm" data-act="editWork" data-fromform="1">+ New</button></div></div>`);
+  if (has('work') && !projLine && (f.type !== 'lent' || f.workId || person(f.personId)?.kind === 'staff')) extra.push(`<div class="field"><label>Project / site (optional)</label><div class="row"><select class="inp grow" data-f="workId">${opt(S.works.filter(w => !w.closed || w.id === f.workId), f.workId, 'None')}</select><button type="button" class="btn sm" data-act="editWork" data-fromform="1">+ New</button></div></div>`);
   if (!billMode) extra.push(`<div class="field"><label>Note</label><input data-f="note" value="${esc(f.note)}" placeholder="What was it for?" maxlength="200"></div>`);
   if (has('receipt')) {
     const src = f.receiptData || (f.receipt ? imgCache[f.receipt] : '');
@@ -1463,7 +1466,7 @@ function openMenu() {
     : `<b>Backup not set up</b><span>${S.settings.lastBackup ? 'Last file backup ' + fmtShort(S.settings.lastBackup.slice(0, 10)) : 'Your data is only on this phone'}</span>`;
   $('#menuPanel').innerHTML = `<div class="dr-head"><div class="dr-app">Hisaab</div>
     <button class="dr-acct" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span></button></div>
-    ${VIEWS.more()}${S.settings.pinHash ? `<button class="list-item" data-act="lockNow"><div class="li-main"><div class="li-title">Lock now</div></div></button>` : ''}`;
+    ${VIEWS.more()}`;
   $('#menu').hidden = false; menuOpen = true; pushHist();
   requestAnimationFrame(() => $('#menu').classList.add('open'));
 }
@@ -1478,20 +1481,21 @@ VIEWS.more = () => {
   const lb = S.settings.lastBackup;
   const item = (v, t, s) => `<button class="list-item" data-act="go" data-v="${v}"><div class="li-main"><div class="li-title">${t}</div><div class="li-sub">${s}</div></div>›</button>`;
   const ab = accountBalances();
-  return `<div class="card flush">
+  return `<div class="mn-h">Money</div><div class="card flush">
     ${(() => { const r = budgetRows(today().slice(0, 7)).rows.find(x => x.k === 'total'); const n = budgetRows(today().slice(0, 7)).rows.length; return item('budgets', 'Budgets', !n ? 'Set a monthly limit' : r ? (r.left >= 0 ? money(r.left) + ' left this month' : money(-r.left) + ' over this month') : n + ' budget' + (n > 1 ? 's' : '')); })()}
-  </div>
-  <div class="card flush">
     ${item('accounts', 'Accounts & balance check', `${S.accounts.length} accounts · total ${money(Object.values(ab).reduce((a, b) => a + b, 0))}`)}
     <button class="list-item" data-act="goEntries" data-filter=""><div class="li-main"><div class="li-title">All entries</div><div class="li-sub">${live().length} entries · search and filter</div></div>›</button>
-    ${item('works', 'Projects / sites', `${S.works.length} · group spending by a job, site or event`)}
+  </div>
+  <div class="mn-h">Organise</div><div class="card flush">
+    ${item('works', 'Projects', `${S.works.filter(w => !w.closed).length} open · a job, site or event`)}
     ${item('templates', 'Quick templates', `${S.templates.length} saved`)}
     ${item('books', 'Areas', (S.books.map(b => b.name).join(', ') || 'None') + ' · split your spending')}
     ${item('cats', 'Categories', `${S.categories.length} categories`)}
   </div>
-  <div class="card flush">
+  <div class="mn-h">App</div><div class="card flush">
     ${item('backup', 'Backup & restore', S.settings.drive.connected ? (S.settings.drive.needsReconnect ? 'Google Drive: reconnect needed' : 'Google Drive auto backup on' + (S.settings.drive.lastBackup ? ' · ' + fmtDate(S.settings.drive.lastBackup.slice(0, 10)) : '')) : lb ? 'Last backup ' + fmtDate(lb.slice(0, 10)) : 'Never backed up')}
-    ${item('security', 'App lock', S.settings.pinHash ? 'PIN is on' : 'Off')}
+    ${item('security', 'App lock', S.settings.pinHash ? 'PIN is on' + (S.settings.bioId ? ' · fingerprint' : '') : 'Off')}
+    ${S.settings.pinHash ? `<button class="list-item" data-act="lockNow"><div class="li-main"><div class="li-title">Lock now</div></div>${svgIcon('lock')}</button>` : ''}
     ${item('prefs', 'Preferences', `${THEME_LBL[S.settings.theme] || THEME_LBL.system} · ${(TEXT_SIZES.find(x => x[0] === Number(S.settings.textSize)) || TEXT_SIZES[1])[1]} text · ${esc(S.settings.currency || 'Rs')} · ${S.settings.numStyle === 'intl' ? 'International' : 'Lakh'}`)}
     ${item('help', 'How to use Hisaab', 'Simple steps and examples for every situation')}
   </div>
@@ -1570,8 +1574,31 @@ function simpleList(kind, items, sub, colored) {
     ${colored ? `<span class="ico sq">${svgIcon(catIcon(x.name))}</span>` : ''}
     <div class="li-main"><div class="li-title">${esc(x.name)}</div>${sub ? `<div class="li-sub">${sub(x)}</div>` : ''}</div>›</button>`).join('') || '<div class="empty">None yet.</div>'}</div>`;
 }
-VIEWS.books = () => `<p class="muted small" style="margin:0 2px 10px">Areas split your spending so you can compare, for example Home vs Office vs Car. Categories (fuel, grocery…) say what it was; the area says what it was for.</p>` + simpleList('book', S.books, b => `${live().filter(e => e.bookId === b.id).length} entries`);
-VIEWS.cats = () => `<div class="sec-title">Spending</div>${simpleList('catout', S.categories.filter(c => c.kind === 'out' && !c.bill), null, true)}<div class="sec-title">Bill types</div>${simpleList('catbill', S.categories.filter(c => c.bill), null, true)}<div class="sec-title">Income</div>${simpleList('catin', S.categories.filter(c => c.kind === 'in'), null, true)}`;
+// Areas, categories and projects share one list design: what it is, how many entries, this month's amount.
+function groupRows(kind, items, o) {
+  return `<div class="card flush">${items.map(x => {
+    const n = o.count(x), v = o.month(x);
+    return `<div class="list-item gl-row">${o.icon ? `<span class="ico sq">${svgIcon(catIcon(x.name))}</span>` : `<span class="ico gl-av">${esc((x.name || '?').trim()[0] || '?').toUpperCase()}</span>`}
+      <button class="li-main gl-main" ${o.open(x)}><div class="li-title">${esc(x.name)}</div><div class="li-sub">${n} ${n === 1 ? 'entry' : 'entries'}${v ? ` · <b>${money(v)}</b> this month` : ''}</div></button>
+      <button class="icon-btn gl-edit" data-act="editSimple" data-kind="${kind}" data-id="${x.id}" aria-label="Edit ${esc(x.name)}">${svgIcon('pencil')}</button></div>`;
+  }).join('') || '<div class="empty">None yet.</div>'}</div>`;
+}
+function groupHead(kind, label) { return `<div class="sec-title">${label}<button data-act="editSimple" data-kind="${kind}">+ Add</button></div>`; }
+VIEWS.books = () => {
+  const m = spendMonth(today().slice(0, 7)).byBook;
+  return `<p class="muted small" style="margin:0 2px 4px">Areas split your spending so you can compare, for example Home vs Office vs Car. Tap one to see its entries.</p>
+    ${groupHead('book', 'Areas')}${groupRows('book', S.books, { count: b => live().filter(e => e.bookId === b.id).length, month: b => m[b.id] || 0, open: b => `data-act="insBook" data-b="${b.id}"` })}`;
+};
+VIEWS.cats = () => {
+  const ym = today().slice(0, 7), m = spendMonth(ym).byCat, [f, to] = monthBounds(ym);
+  const inc = {}; live().forEach(e => { if (e.type === 'income' && e.date >= f && e.date <= to) inc[e.categoryId] = r2((inc[e.categoryId] || 0) + e.amount); });
+  const cnt = c => live().filter(e => e.categoryId === c.id).length;
+  const o = (mm) => ({ icon: true, count: cnt, month: c => mm[c.id] || 0, open: c => `data-act="catEntries" data-c="${c.id}"` });
+  const byUse = list => list.slice().sort((a, b) => (m[b.id] || inc[b.id] || 0) - (m[a.id] || inc[a.id] || 0) || cnt(b) - cnt(a));
+  return `${groupHead('catout', 'Spending')}${groupRows('catout', byUse(S.categories.filter(c => c.kind === 'out' && !c.bill)), o(m))}
+    ${groupHead('catbill', 'Bill types')}${groupRows('catbill', byUse(S.categories.filter(c => c.bill)), o(m))}
+    ${groupHead('catin', 'Income')}${groupRows('catin', byUse(S.categories.filter(c => c.kind === 'in')), o(inc))}`;
+};
 
 function workStats(wid) {
   const am = allocMap();
@@ -1584,26 +1611,50 @@ function workStats(wid) {
   }
   return { own, rec, recPending, adv, viaStaff, total: r2(own + rec), entries };
 }
-VIEWS.works = () => `<button class="btn block" style="margin-bottom:12px" data-act="editWork">+ Work / site</button>
-  <div class="card flush">${S.works.map(w => { const st = workStats(w.id); return `<button class="list-item" data-act="go" data-v="work" data-p="${w.id}">
-    <div class="li-main"><div class="li-title">${esc(w.name)}${w.closed ? ' <span class="badge">closed</span>' : ''}</div><div class="li-sub">${w.ref ? esc(w.ref) + ' · ' : ''}${st.entries.length} entries</div></div>
-    <div class="li-amt">${money(st.total)}<div class="li-sub">${st.recPending ? 'pending ' + money(st.recPending) : ''}</div></div></button>`; }).join('') || '<div class="empty">No works yet. Add a site, project or estimate to group its spending.</div>'}</div>`;
+VIEWS.works = () => `<div class="iv-body">${ivProjects(today().slice(0, 7))}</div>`;
 
 VIEWS.work = (wid) => {
   const w = work(wid);
   if (!w) return '<div class="empty">Not found.</div>';
-  const st = workStats(wid);
-  return `<div class="tiles">
-    <div class="tile"><div class="lbl">Total spent on work</div><div class="val">${money(st.total)}</div><div class="sub">own ${money(st.own)} · recoverable ${money(st.rec)}</div></div>
-    <div class="tile"><div class="lbl">Still to get back</div><div class="val in">${money(st.recPending)}</div><div class="sub">advances given ${money(st.adv)}</div></div>
-  </div>
-  <div class="btn-row" style="margin-bottom:12px">
-    <button class="btn sm" data-act="shareWork" data-p="${wid}">WhatsApp summary</button>
-    <button class="btn sm" data-act="printWork" data-p="${wid}">PDF / print</button>
-    <button class="btn sm" data-act="editWork" data-id="${wid}">Edit</button>
-  </div>
-  ${w.ref ? `<p class="muted small" style="margin-bottom:8px">Ref: ${esc(w.ref)}</p>` : ''}
-  <div class="card flush">${st.entries.length ? [...st.entries].sort(sortDesc).map(e => entryItem(e)).join('') : '<div class="empty">No entries linked to this work.</div>'}</div>`;
+  const st = workStats(wid), ents = [...st.entries].sort(sortDesc);
+  const withPeople = Math.max(0, r2(st.adv - st.viaStaff));
+  const ownPct = st.total ? st.own / st.total * 100 : 0;
+  // categories on this project (donut + list, like Insights)
+  const byCat = {};
+  for (const e of st.entries) if (e.type === 'expense' || e.type === 'recoverable') byCat[e.categoryId || '_none'] = r2((byCat[e.categoryId || '_none'] || 0) + e.amount);
+  const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  const top = cats.slice(0, cats.length > IV_SLOTS + 1 ? IV_SLOTS : IV_SLOTS + 1), rest = cats.slice(top.length), restV = r2(rest.reduce((a, c) => a + c[1], 0));
+  const slices = top.map(([id, v], i) => ({ id, v, name: catName(id), color: id.startsWith('_') ? 'var(--c-other)' : `var(--c${(i % IV_SLOTS) + 1})` }));
+  if (restV) slices.push({ id: '_rest', v: restV, name: rest.length + ' more', color: 'var(--c-other)' });
+  // spending by month on this project
+  const byM = {}; for (const e of st.entries) if (e.type === 'expense' || e.type === 'recoverable') byM[e.date.slice(0, 7)] = r2((byM[e.date.slice(0, 7)] || 0) + e.amount);
+  const ms = Object.keys(byM).sort(), months = ms.length ? (() => { const out = []; for (let m = ms[0]; m <= ms[ms.length - 1] && out.length < 12; m = shiftYm(m, 1)) out.push({ m, v: byM[m] || 0 }); return out.slice(-12); })() : [];
+  const last = ents.length ? ents[0].date : '';
+  return `<div class="iv-body">
+    <section class="iv-hero">
+      <div class="iv-hero-top"><span>${[w.ref ? 'Ref ' + esc(w.ref) : '', w.closed ? 'Finished' : 'Open', last ? 'last entry ' + fmtShort(last) : ''].filter(Boolean).join(' · ')}</span></div>
+      <div class="iv-hero-amt">${money(st.total)}</div>
+      <div class="muted small" style="margin:-4px 0 10px">spent on this project so far</div>
+      ${st.total ? `<div class="iv-split">${st.own ? `<i class="own" style="width:${ownPct}%"></i>` : ''}${st.rec ? `<i class="rec" style="width:${100 - ownPct}%"></i>` : ''}</div>
+      <div class="iv-legend">${st.own ? `<span><i class="k-own"></i>My own ${money(st.own)}</span>` : ''}${st.rec ? `<span><i class="k-rec"></i>To be repaid ${money(st.rec)}</span>` : ''}</div>` : ''}
+      <div class="iv-stats">
+        <div><span>Still to get back</span><b class="${st.recPending ? 'in' : ''}">${money(st.recPending)}</b></div>
+        <div><span>Given to spend</span><b>${money(st.adv)}</b></div>
+        <div><span>Cash with people</span><b class="${withPeople ? 'warn' : ''}">${money(withPeople)}</b></div>
+      </div>
+    </section>
+    <div class="pj-actions">
+      <button class="btn" data-act="addToWork" data-p="${wid}">+ Add</button>
+      <button class="btn" data-act="shareWork" data-p="${wid}">WhatsApp</button>
+      <button class="btn" data-act="printWork" data-p="${wid}">PDF</button>
+      <button class="btn" data-act="editWork" data-id="${wid}">Edit</button>
+    </div>
+    ${cats.length ? `<section class="iv-card"><div class="iv-h">What it went on</div>${cats.length > 1 ? `<div class="iv-donut-wrap">${ivDonut(slices, st.total)}</div>` : ''}
+      <div class="iv-list">${slices.map(sl => `<div class="iv-row"><i class="iv-sw" style="background:${sl.color}"></i><span class="grow"><span class="iv-rn">${esc(sl.name)}</span></span><span class="iv-rv"><b>${money(sl.v)}</b><span>${Math.round(sl.v / st.total * 100)}%</span></span></div>`).join('')}</div></section>` : ''}
+    ${months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, months[months.length - 1].m)}</section>` : ''}
+    <div class="iv-h" style="margin-top:6px">Entries <span>${ents.length}</span></div>
+    <div class="card flush">${ents.length ? ents.map(e => entryItem(e)).join('') : '<div class="empty">Nothing linked yet. Tap “+ Add entry”, or pick this project on the Add screen.</div>'}</div>
+  </div>`;
 };
 
 VIEWS.templates = () => `<div class="card flush">${S.templates.map(t => `<div class="list-item">
@@ -2297,12 +2348,17 @@ VIEWS.backup = () => {
   </div>`;
 };
 
-VIEWS.security = () => `<div class="card">
-  ${S.settings.pinHash ? `<p style="margin-bottom:12px">PIN lock is <b>on</b>. The app locks on open and after ${S.settings.lockAfter} seconds in the background.</p>
+VIEWS.security = () => {
+  const on = !!S.settings.pinHash;
+  return `<div class="card">
+  ${on ? `<p style="margin-bottom:12px">PIN lock is <b>on</b> (${S.settings.pinLen || 4} digits). The app locks when opened and after ${S.settings.lockAfter} seconds away.</p>
     <div class="btn-row"><button class="btn" data-act="setPin">Change PIN</button><button class="btn danger" data-act="removePin">Turn off</button></div>`
-  : `<p style="margin-bottom:12px">Set a 4–8 digit PIN to lock the app. If you forget it, the only way back in is erasing data and restoring a backup.</p>
+  : `<p style="margin-bottom:12px">Lock the app with a 4 or 6 digit PIN. If you forget it, the only way back in is erasing data on this phone and restoring a backup.</p>
     <button class="btn primary block" data-act="setPin">Set PIN</button>`}
-  </div>`;
+  </div>
+  ${on ? `<div class="card"><div class="row"><div class="grow"><b>Fingerprint</b><div class="muted small">${S.settings.bioId ? 'On. Your PIN still works.' : 'Unlock with your fingerprint instead of typing the PIN.'}</div></div>
+    ${S.settings.bioId ? '<button class="btn sm" data-act="bioOff">Turn off</button>' : '<button class="btn sm primary" data-act="bioOn">Turn on</button>'}</div></div>` : ''}`;
+};
 
 // ---------------- How to use (plain guide with examples) ----------------
 const HELP = [
@@ -2339,7 +2395,7 @@ const HELP = [
     ['I paid for office work and will NOT be reimbursed', `<p>Same, but choose <b>Not coming back</b>. It counts as your spending, tagged Office.</p>`],
     ['The office paid me back', `<p>Open Office in People → <b>I received</b> → <b>Paying back items</b> → Save. Then check which items the money covers. Each item closes on its own; a part payment leaves the rest open. If they paid more than the items, the extra reduces what they owe.</p>`],
     ['I will never get it back', `<p>Open the item → <b>Won't get it back</b>. From then on it counts as your own spending.</p>`],
-    ['Group costs of one job or site', `<p><b>☰ → Projects / sites</b> → add one (e.g. "Canal bank repair"). Pick it under <b>More details → Project</b> when adding entries. The project page totals everything.</p>`]
+    ['Group costs of one job or site', `<p><b>☰ → Projects</b> → add one (e.g. "Canal bank repair"). Then pick it on the <b>Project</b> line under Area when adding entries (it shows once you have an open project, and always starts at None). The project page shows the total, your own share vs what will be repaid, what it went on, month by month, and cash still with your people. Mark it <b>Finished</b> when done.</p>`]
   ]],
   ['Bills', [
     ['Add a monthly bill', `<p><b>Bills → + Add bill</b> → pick the type (Electricity, Gas, Internet…) → amount → due date → <b>How often: Every month</b>.</p>`],
@@ -2366,7 +2422,7 @@ const HELP = [
     ['Where is my data kept?', `<p>On this phone, inside the browser you opened Hisaab with. Another browser, another phone, or an Incognito tab starts empty. Clearing Chrome's "site data" erases it. That's why backup matters.</p>`],
     ['Turn on automatic backup', `<p><b>☰ → Backup &amp; restore → Google Drive</b>. After that every change is saved to the "Hisaab Backups" folder in your Drive. The ☰ menu shows "Backed up today" when it's working.</p><p>Drive keeps one file per day for the last 15 days, so you can go back to an earlier day. Backup runs while the app is open; changes made offline are sent the next time you open it online. If changes wait more than a day, Home shows <b>Changes not backed up</b>: tap it. If Google asks you to sign in again, Home shows <b>Backup paused</b>: tap it once.</p>`],
     ['I see the Welcome screen and my entries are gone', `<p>Don't enter new balances yet. First, open Hisaab the same way as before (same icon, same browser, same link). If it's still empty, on the Welcome screen tap <b>Restore from backup</b> and choose Google Drive or your backup file.</p>`],
-    ['Lock the app with a PIN', `<p><b>☰ → App lock</b> → set a 4-digit PIN. <b>☰ → Lock now</b> locks it straight away.</p>`]
+    ['Lock the app with a PIN or fingerprint', `<p><b>☰ → App lock → Set PIN</b>: type 4 digits (or tap "Use 6 digits"), then type it again. It moves on by itself, no OK button. Then you can turn on <b>fingerprint</b>. <b>☰ → Lock now</b> locks it straight away.</p><p>After 5 wrong tries the keypad waits 30 seconds. A forgotten PIN can't be recovered: erase data on the phone and restore your backup.</p>`]
   ]],
   ['Settings', [
     ['Bigger text, dark mode, currency', `<p><b>☰ → Preferences</b>: Appearance (same as phone, light, dark), Text size, Currency symbol, Number style (12,50,000 or 1,250,000).</p>`],
@@ -2433,7 +2489,7 @@ async function openEntry(id) {
   if (e.personId) dl(e.type === 'recoverable' ? 'Recover from' : 'Person', esc(person(e.personId)?.name || '—'));
   if (e.bookId) dl('Area', esc(book(e.bookId)?.name || '—'));
   if (e.categoryId) dl('Category', esc(cat(e.categoryId)?.name || '—'));
-  if (e.workId) dl('Work', esc(work(e.workId)?.name || '—'));
+  if (e.workId) dl('Project', esc(work(e.workId)?.name || '—'));
   if (e.dueDate) dl('Return by', fmtDate(e.dueDate));
   if (REPEAT_LBL[e.repeat]) dl('Repeats', REPEAT_LBL[e.repeat]);
   if (e.note) dl('Note', esc(e.note));
@@ -2700,10 +2756,10 @@ async function deleteAccount(id) {
 function openWorkEditor(id, fromForm) {
   const w = id ? work(id) : null;
   editorReturnField = fromForm ? 'workId' : null;
-  openSheet(`${sheetHead(w ? 'Edit work / site' : 'New work / site')}
-    <div class="field"><label>Name</label><input id="wName" value="${esc(w?.name || '')}" placeholder="e.g. Office repair, Site name"></div>
-    <div class="field"><label>Reference (optional)</label><input id="wRef" value="${esc(w?.ref || '')}" placeholder="Estimate / project no."></div>
-    ${w ? `<label class="inline-check"><input type="checkbox" class="check" id="wClosed" ${w.closed ? 'checked' : ''}> Closed (hide from Add screen)</label>` : ''}
+  openSheet(`${sheetHead(w ? 'Edit project' : 'New project / site')}
+    <div class="field"><label>Name</label><input id="wName" value="${esc(w?.name || '')}" placeholder="e.g. Office repair, Wedding, Site name"></div>
+    <div class="field"><label>Reference (optional)</label><input id="wRef" value="${esc(w?.ref || '')}" placeholder="Estimate or project no."></div>
+    ${w ? `<label class="inline-check"><input type="checkbox" class="check" id="wClosed" ${w.closed ? 'checked' : ''}> Finished (hide from the Add screen)</label>` : ''}
     <div class="btn-row">${w ? `<button class="btn danger" data-act="deleteWork" data-id="${w.id}">Delete</button>` : ''}<button class="btn primary" data-act="saveWork" data-id="${w?.id || ''}">Save</button></div>`);
   setTimeout(() => $('#wName')?.focus(), 50);
 }
@@ -2722,8 +2778,8 @@ async function saveWork(id) {
 }
 async function deleteWork(id) {
   const used = S.entries.filter(e => e.workId === id).length;
-  if (used) { toast(`Used in ${used} entries — mark it closed instead`); return; }
-  if (!(await confirmBox('Delete work', 'Delete this work?', 'Delete', true))) return;
+  if (used) { toast(`Used in ${used} entries. Mark it finished instead.`); return; }
+  if (!(await confirmBox('Delete project', 'Delete this project?', 'Delete', true))) return;
   S.works = S.works.filter(w => w.id !== id);
   await save(); toast('Deleted');
   if (cur.v === 'work') back(); else render();
@@ -2803,11 +2859,11 @@ function printPerson(pid) {
 function workText(wid) {
   const w = work(wid); const st = workStats(wid);
   const lines = [...st.entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-20).map(e => `${fmtShort(e.date)} · ${typeLabel(e.type)} · ${entryTitle(e)} · ${money(e.amount)}`);
-  return `Work: ${w.name}${w.ref ? ' (' + w.ref + ')' : ''}\nAs of ${fmtDate(today())}\nTotal spent: ${money(st.total)}\nRecoverable: ${money(st.rec)} (pending ${money(st.recPending)})\nAdvances given: ${money(st.adv)}\n\n${lines.join('\n')}`;
+  return `Project: ${w.name}${w.ref ? ' (' + w.ref + ')' : ''}\nAs of ${fmtDate(today())}\nTotal spent: ${money(st.total)}\nRecoverable: ${money(st.rec)} (pending ${money(st.recPending)})\nAdvances given: ${money(st.adv)}\n\n${lines.join('\n')}`;
 }
 function printWork(wid) {
   const w = work(wid); const st = workStats(wid); const am = allocMap();
-  printHTML(`Work report: ${w.name}`, `${w.ref ? 'Ref: ' + esc(w.ref) + ' · ' : ''}as of ${fmtDate(today())}`,
+  printHTML(`Project report: ${w.name}`, `${w.ref ? 'Ref: ' + esc(w.ref) + ' · ' : ''}as of ${fmtDate(today())}`,
     [{ t: 'Date' }, { t: 'Type' }, { t: 'Detail' }, { t: 'Status' }, { t: 'Amount', n: 1 }],
     [...st.entries].sort((a, b) => (a.date < b.date ? -1 : 1)).map(e => [fmtDate(e.date), esc(typeLabel(e.type)), esc(entryTitle(e)) + (person(e.viaPersonId) ? ' (paid by ' + esc(person(e.viaPersonId).name) + ')' : ''), e.type === 'recoverable' ? recInfo(e, am).status : '', money(e.amount)]),
     `Total spent ${money(st.total)} · Recoverable ${money(st.rec)} · Pending ${money(st.recPending)} · Advances ${money(st.adv)}`);
@@ -2925,37 +2981,81 @@ async function hashPin(pin, salt) {
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
   return 'fnv:' + (h >>> 0).toString(16);
 }
-let pinBuf = '', pinMode = null; // null=unlock, {step, first}
+// ---------------- App lock: PIN keypad + fingerprint ----------------
+let pinBuf = '', pinMode = null; // null = unlock, { step, first, len } = setting a PIN
+const LOCK_MAX = 5, LOCK_WAIT = 30;
+function lockFails() { try { return JSON.parse(localStorage.getItem('hisaab_pinfail') || '{"n":0,"until":0}'); } catch (e) { return { n: 0, until: 0 }; } }
+function setLockFails(v) { try { localStorage.setItem('hisaab_pinfail', JSON.stringify(v)); } catch (e) { /* ignore */ } }
+const B64 = { enc: buf => btoa(String.fromCharCode(...new Uint8Array(buf))), dec: s => Uint8Array.from(atob(s), c => c.charCodeAt(0)) };
+async function bioAvailable() {
+  const secure = location.protocol === 'https:' || location.hostname === 'localhost';
+  try { return secure && !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); } catch (e) { return false; }
+}
+async function bioEnable() {
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: 'Hisaab' },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'Hisaab', displayName: 'Hisaab' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, timeout: 60000 } });
+    if (!cred) return false;
+    S.settings.bioId = B64.enc(cred.rawId); await save(); return true;
+  } catch (e) { return false; }
+}
+async function bioUnlock() {
+  if (!S.settings.bioId || $('#lock').hidden || pinMode) return;
+  try {
+    const ok = await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{ type: 'public-key', id: B64.dec(S.settings.bioId) }], userVerification: 'required', timeout: 60000 } });
+    if (ok) unlockNow();
+  } catch (e) { lockMsg('Use your PIN'); }
+}
+function lockMsg(t, bad) { const m = $('#lockMsg'); m.textContent = t || ''; m.classList.toggle('bad', !!bad); }
+function unlockNow() {
+  $('#lock').hidden = true; pinBuf = ''; lastHidden = 0; setLockFails({ n: 0, until: 0 });
+  if (pendingRestore) { pendingRestore = false; openDriveRestore(); }
+  else if (pendingAutoSync) { pendingAutoSync = false; maybeAutoSync(); }
+}
 function showLock() {
   pinBuf = ''; pinMode = null;
-  $('#lock h2').textContent = 'Hisaab is locked';
-  $('#lock p').textContent = 'Enter your PIN';
-  $('[data-act="forgotPin"]').hidden = false;
+  $('#lockTitle').textContent = 'Enter your PIN';
+  lockMsg('');
+  $('#lockAlt').textContent = 'Forgot PIN?'; $('#lockAlt').dataset.act = 'forgotPin'; $('#lockAlt').style.visibility = '';
   $('#lock').hidden = false;
-  drawPin();
+  drawKeypad(); drawPin(); lockCooldown();
+  if (S.settings.bioId && !document.hidden) setTimeout(bioUnlock, 250);
 }
 function drawKeypad() {
-  $('#keypad').innerHTML = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map(k => `<button data-act="pinKey" data-k="${k}">${k}</button>`).join('');
+  const left = pinMode ? `<button class="kp-txt" data-act="cancelPinSet">Cancel</button>`
+    : S.settings.bioId ? `<button class="kp-bio" data-act="bioUnlock" aria-label="Unlock with fingerprint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v3a8 8 0 0 1-1 4M8.5 8.5A5 5 0 0 1 17 12v1a14 14 0 0 1-.6 4M7 12a5 5 0 0 1 .3-1.7M5 18.5A12 12 0 0 0 7 13.5M15.5 20.5c.3-1 .5-2 .5-3M3.5 9.5a9.5 9.5 0 0 1 17 0M12 3a9 9 0 0 1 6 2.3M6 5.3A9 9 0 0 1 9 3.5"/></svg></button>`
+    : '<span></span>';
+  $('#keypad').innerHTML = ['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(k => `<button data-act="pinKey" data-k="${k}">${k}</button>`).join('')
+    + left + `<button data-act="pinKey" data-k="0">0</button><button class="kp-txt" data-act="pinKey" data-k="⌫" aria-label="Delete"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H9l-6 7 6 7h12zM18 9l-6 6M12 9l6 6"/></svg></button>`;
 }
+function pinLenNow() { return pinMode ? pinMode.len : (S.settings.pinLen || 0); }
 function drawPin() {
-  const n = Math.max(4, pinBuf.length);
+  const n = pinLenNow() || Math.max(4, pinBuf.length);
   $('#pinDots').innerHTML = Array.from({ length: n }, (_, i) => `<i class="${i < pinBuf.length ? 'f' : ''}"></i>`).join('');
 }
+function lockCooldown() {
+  const f = lockFails(), left = Math.ceil((f.until - Date.now()) / 1000);
+  const kp = $('#keypad'); if (!kp) return false;
+  if (left > 0 && !pinMode) {
+    kp.classList.add('off'); lockMsg(`Too many tries. Wait ${left} s`, true);
+    clearTimeout(lockCooldown._t); lockCooldown._t = setTimeout(lockCooldown, 1000); return true;
+  }
+  if (kp.classList.contains('off')) { kp.classList.remove('off'); lockMsg(''); }
+  return false;
+}
 async function pinKey(k) {
-  if (k === 'C') pinBuf = '';
-  else if (k === '⌫') pinBuf = pinBuf.slice(0, -1);
+  if ($('#lock').hidden || (!pinMode && lockCooldown())) return;
+  if (k === '⌫') pinBuf = pinBuf.slice(0, -1);
   else if (pinBuf.length < 8) pinBuf += k;
   drawPin();
-  if (pinMode) return;
+  if (pinMode) { if (pinBuf.length === pinMode.len) setTimeout(pinSetStep, 120); return; }
   const need = S.settings.pinLen || 0;
   if (pinBuf.length >= 4 && (!need || pinBuf.length === need)) {
-    const tryPin = pinBuf;
-    const h = await hashPin(tryPin, S.settings.pinSalt);
-    if (h === S.settings.pinHash) {
-      $('#lock').hidden = true; pinBuf = ''; lastHidden = 0;
-      if (pendingRestore) { pendingRestore = false; openDriveRestore(); }
-      else if (pendingAutoSync) { pendingAutoSync = false; maybeAutoSync(); }
-    }
+    const h = await hashPin(pinBuf, S.settings.pinSalt);
+    if (h === S.settings.pinHash) unlockNow();
     else if (need || pinBuf.length === 8) failPin();
   }
 }
@@ -2963,33 +3063,39 @@ function failPin() {
   const box = $('.lock-box');
   box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
   pinBuf = ''; drawPin();
+  if (pinMode) return;
+  const f = lockFails(); f.n++;
+  if (f.n >= LOCK_MAX) { f.until = Date.now() + LOCK_WAIT * 1000; f.n = 0; setLockFails(f); lockCooldown(); return; }
+  setLockFails(f);
+  lockMsg(`Wrong PIN · ${LOCK_MAX - f.n} ${LOCK_MAX - f.n === 1 ? 'try' : 'tries'} left`, true);
+  if (navigator.vibrate) navigator.vibrate(80);
 }
-function startSetPin() {
-  pinMode = { step: 1, first: '' }; pinBuf = '';
-  $('#lock h2').textContent = 'Set a PIN';
-  $('#lock p').innerHTML = 'Type 4–8 digits, then tap OK<br><button class="btn primary sm mt" data-act="pinOk">OK</button> <button class="btn sm mt" data-act="cancelPinSet">Cancel</button>';
-  $('[data-act="forgotPin"]').hidden = true;
+function startSetPin(len = 4) {
+  pinMode = { step: 1, first: '', len }; pinBuf = '';
+  $('#lockTitle').textContent = 'Choose a PIN';
+  lockMsg(`${len} digits`);
+  $('#lockAlt').textContent = len === 4 ? 'Use 6 digits instead' : 'Use 4 digits instead'; $('#lockAlt').dataset.act = 'pinLenSwap'; $('#lockAlt').style.visibility = '';
   $('#lock').hidden = false;
-  drawPin();
+  drawKeypad(); drawPin();
 }
 async function pinSetStep() {
-  if (!pinMode) return;
-  if (pinBuf.length < 4) { toast('PIN must be at least 4 digits'); return; }
+  if (!pinMode || pinBuf.length !== pinMode.len) return;
   if (pinMode.step === 1) {
-    pinMode = { step: 2, first: pinBuf }; pinBuf = '';
-    $('#lock h2').textContent = 'Confirm PIN';
-    drawPin();
-  } else {
-    if (pinBuf !== pinMode.first) { toast('PINs did not match, try again'); pinMode = { step: 1, first: '' }; pinBuf = ''; $('#lock h2').textContent = 'Set a PIN'; failPin(); return; }
-    S.settings.pinSalt = uid();
-    S.settings.pinHash = await hashPin(pinBuf, S.settings.pinSalt);
-    S.settings.pinLen = pinBuf.length;
-    await save();
-    pinMode = null; pinBuf = '';
-    $('#lock').hidden = true;
-    toast('PIN set');
-    render();
+    pinMode = { ...pinMode, step: 2, first: pinBuf }; pinBuf = '';
+    $('#lockTitle').textContent = 'Type it again'; lockMsg('To confirm'); $('#lockAlt').style.visibility = 'hidden';
+    drawPin(); return;
   }
+  if (pinBuf !== pinMode.first) { const len = pinMode.len; failPin(); startSetPin(len); lockMsg('PINs did not match. Choose again.', true); return; }
+  S.settings.pinSalt = uid();
+  S.settings.pinHash = await hashPin(pinBuf, S.settings.pinSalt);
+  S.settings.pinLen = pinBuf.length;
+  await save();
+  pinMode = null; pinBuf = '';
+  $('#lock').hidden = true; setLockFails({ n: 0, until: 0 });
+  render();
+  if (!S.settings.bioId && await bioAvailable() && await confirmBox('Use fingerprint too?', 'Unlock Hisaab with your fingerprint. Your PIN still works.', 'Use fingerprint')) {
+    toast(await bioEnable() ? 'PIN and fingerprint set' : 'PIN set. Fingerprint not available.'); render();
+  } else toast('PIN set');
 }
 let lastHidden = 0;
 document.addEventListener('visibilitychange', () => {
@@ -2997,6 +3103,7 @@ document.addEventListener('visibilitychange', () => {
   if (!S || !S.settings.pinHash) return;
   if (document.hidden) lastHidden = Date.now();
   else if (lastHidden && Date.now() - lastHidden > S.settings.lockAfter * 1000) showLock();
+  else if (!$('#lock').hidden && S.settings.bioId && !pinMode) setTimeout(bioUnlock, 250);
 });
 
 // ---------------- Event handling ----------------
@@ -3077,6 +3184,7 @@ const ACT = {
     go('entries');
   },
   clearEF: () => { ui.entryFilter = null; render(); },
+  catEntries: el => { ui.entryFilter = { month: today().slice(0, 7), type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false, cat: el.dataset.c }; go('entries'); },
   pasteSms: () => pasteSms(),
   smsFromBox: () => { const t = $('#smsText').value; closeSheet(); openFromSms(t); },
   smsDismiss: () => { form.sms = null; render(); },
@@ -3321,6 +3429,7 @@ const ACT = {
   shareWA: el => { closeSheet(); const p = person(el.dataset.p); openWhatsApp(p.phone, personStatementText(p.id)); },
   printPerson: el => { closeSheet(); printPerson(el.dataset.p); },
   shareWork: el => openWhatsApp('', workText(el.dataset.p)),
+  addToWork: el => openFormWith({ type: 'expense', workId: el.dataset.p }),
   printWork: el => printWork(el.dataset.p),
   renameTpl: async el => {
     const t = S.templates.find(x => x.id === el.dataset.id); if (!t) return;
@@ -3332,10 +3441,14 @@ const ACT = {
   pickRestore: () => $('#fileRestore').click(),
   eraseAll: () => eraseAll(),
   setPin: () => startSetPin(),
-  cancelPinSet: () => { pinMode = null; pinBuf = ''; $('#lock').hidden = true; },
+  cancelPinSet: () => { pinMode = null; pinBuf = ''; $('#lock').hidden = true; drawKeypad(); },
+  pinLenSwap: () => startSetPin(pinMode && pinMode.len === 4 ? 6 : 4),
+  bioUnlock: () => bioUnlock(),
+  bioOn: async () => { toast(await bioEnable() ? 'Fingerprint unlock is on' : 'Fingerprint not available on this phone'); render(); },
+  bioOff: async () => { S.settings.bioId = ''; await save(); toast('Fingerprint unlock is off'); render(); },
   removePin: async () => {
     if (!(await confirmBox('Turn off PIN', 'Anyone with your phone will be able to open the app.', 'Turn off', true))) return;
-    S.settings.pinHash = ''; S.settings.pinSalt = ''; S.settings.pinLen = 0; await save(); toast('PIN turned off'); render();
+    S.settings.pinHash = ''; S.settings.pinSalt = ''; S.settings.pinLen = 0; S.settings.bioId = ''; await save(); toast('PIN turned off'); render();
   },
   lockNow: () => showLock(),
   pinKey: el => pinKey(el.dataset.k),
@@ -3423,6 +3536,7 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.dataset.f === 'paidFromWho') { form.paidFrom = t.value ? 'p:' + t.value : 'ask'; render(); return; }
   if (t.dataset.f === 'date' && t.classList.contains('dpick')) { form.date = t.value || today(); render(); return; }
+  if (t.dataset.f === 'workId' && t.value === '__new') { t.value = form.workId || ''; openWorkEditor(null, true); return; }
   if (t.dataset.f && t.tagName === 'SELECT') {
     form[t.dataset.f] = t.value;
     if (t.dataset.f === 'paidFrom') { render(); return; }

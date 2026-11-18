@@ -227,15 +227,24 @@ main { padding: 14px max(16px, env(safe-area-inset-right, 0px)) calc(var(--nav-h
 .sheet img.full { width: 100%; border-radius: 10px; border: 1px solid var(--line); }
 
 /* Lock */
-.lock { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: grid; place-items: center; }
-.lock-box { text-align: center; width: 280px; }
-.lock-box h2 { font-size: 20px; margin-bottom: 4px; }
-.pin-dots { display: flex; justify-content: center; gap: 12px; margin: 20px 0; min-height: 14px; }
-.pin-dots i { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--muted); }
-.pin-dots i.f { background: var(--accent); border-color: var(--accent); }
-.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-.keypad button { height: 58px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-size: 22px; font-weight: 600; }
-.keypad button:active { background: var(--line); }
+.lock { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: grid; place-items: center; padding: 24px 16px calc(24px + env(safe-area-inset-bottom)); }
+.lock-box { text-align: center; width: 100%; max-width: 300px; display: flex; flex-direction: column; align-items: center; }
+.lock-logo { width: 64px; height: 64px; border-radius: 16px; margin-bottom: 18px; box-shadow: 0 6px 20px rgba(15,118,110,.25); }
+.lock-box h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.lock-msg { min-height: 20px; font-size: 14px; color: var(--muted); }
+.lock-msg.bad { color: var(--danger); font-weight: 600; }
+.pin-dots { display: flex; justify-content: center; gap: 16px; margin: 22px 0 30px; min-height: 14px; }
+.pin-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--muted); transition: background .12s, transform .12s; }
+.pin-dots i.f { background: var(--accent); border-color: var(--accent); transform: scale(1.1); }
+.keypad { display: grid; grid-template-columns: repeat(3, 72px); justify-content: center; gap: 16px 28px; margin-bottom: 20px; }
+.keypad.off { opacity: .35; pointer-events: none; }
+.keypad button { width: 72px; height: 72px; border-radius: 50%; background: color-mix(in srgb, var(--text) 8%, transparent); font-size: 28px; font-weight: 500; color: var(--text); display: grid; place-items: center; transition: background .1s; }
+.keypad button:active { background: var(--accent-soft); }
+.keypad .kp-txt, .keypad .kp-bio { background: transparent; font-size: 15px; font-weight: 600; color: var(--muted); }
+.keypad .kp-bio { color: var(--accent); }
+.keypad .kp-txt svg, .keypad .kp-bio svg { width: 28px; height: 28px; }
+.keypad .kp-bio svg { width: 34px; height: 34px; stroke-width: 1.7; }
+.lock-alt { min-height: 44px; }
 .shake { animation: shake .35s; }
 @keyframes shake { 25% { transform: translateX(-8px); } 50% { transform: translateX(8px); } 75% { transform: translateX(-5px); } }
 
@@ -846,3 +855,20 @@ body.roottab:not(.nohead) main { padding-top: 46px; }
 .sms-facts { color: var(--text); line-height: 1.5; margin-bottom: 4px; }
 .sms-dup { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .pastesms { display: block; margin: -4px 2px 10px; }
+
+/* ---------- Unified lists (v36) ---------- */
+.gl-row { padding-right: 4px; }
+.gl-main { flex: 1; min-width: 0; text-align: left; min-height: 44px; }
+.gl-main b { color: var(--text); font-weight: 650; }
+.gl-edit { flex: none; width: 44px; height: 44px; color: var(--muted); }
+.gl-edit svg { width: 18px; height: 18px; }
+.gl-av { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-weight: 700; background: var(--accent-soft); color: var(--accent); flex: none; }
+.arealine > span { min-width: 54px; }
+.pj-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.pj-actions .btn { min-height: 44px; padding: 0 6px; font-size: 13px; }
+.iv-list .iv-row { cursor: default; }
+.mn-h { font-size: 12px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--muted); margin: 14px 4px 6px; }
+.phead-acts { display: flex; gap: 14px; align-items: center; }
+.phead-acts .link { min-height: 44px; }
+.pills.pfit { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; overflow: visible; margin: 0 0 4px; padding: 0 0 4px; }
+.pills.pfit .pill { min-height: 44px; padding: 0 8px; text-align: center; }

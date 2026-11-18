@@ -63,6 +63,12 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 ## Area
 - The Area line sits under the category on the add form. It fills itself from the category (Fuel → where you usually put fuel), never from your last entry, so one area can't silently leak into the next record. Change it in one tap; a hand-picked area is kept for "Save and add another".
 
+## App lock, projects and lists (v36)
+- App lock: 4 or 6 digit PIN that moves on by itself, optional fingerprint unlock, "Wrong PIN · N tries left", 30-second wait after 5 wrong tries. Lock now is in the ☰ menu.
+- Add form: a Project line under Area appears once you have an open project; it always starts at None.
+- Areas, Categories and Projects lists show entries and this month's amount; tap a row for its entries, the pencil to edit. Project page: total, own vs to be repaid, still to get back, cash with people, what it went on, month by month.
+- ☰ menu grouped into Money, Organise and App.
+
 ## Help inside the app
 ☰ > How to use Hisaab: every task explained in plain steps with examples, with a search box.
 
