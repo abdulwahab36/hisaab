@@ -601,11 +601,13 @@ function render() {
   if (cur.v === 'add' && form.kind === 'person' && !form.viaFor && person(form.personId)) title = person(form.personId).name;
   $('#title').textContent = title;
   const rootTab = !stack.length && ['home', 'people', 'bills', 'insights', 'more'].includes(cur.v);
+  const addNew = cur.v === 'add' && addMode() !== 'legacy';
   document.body.classList.toggle('roottab', rootTab);
-  document.body.classList.toggle('nohead', rootTab);
+  document.body.classList.toggle('nohead', rootTab || addNew);
+  document.body.classList.toggle('addmode', addNew);
   const fn = VIEWS[cur.v] || VIEWS.home;
   $('#view').innerHTML = fn(cur.p);
-  if (cur.v === 'add') afterAddRender();
+  if (cur.v === 'add') { afterAddRender(); fitAmount(); }
   saveNav();
 }
 // Remember where you are, so pulling down to refresh keeps you on the same screen.
@@ -991,7 +993,7 @@ function areaForCat(cid) {
   return r && book(r) ? r : '';
 }
 function resetForm(over = {}) {
-  if (typeof ui !== 'undefined') ui.allCats = false;
+  if (typeof ui !== 'undefined') { ui.allCats = false; ui.noteOpen = false; }
   const L = S.settings.last || {};
   const u = uiFromType(over.type || 'expense', over.direction);
   form = {
@@ -1010,7 +1012,7 @@ function opt(list, val, empty) {
   return (empty !== undefined ? `<option value="">${esc(empty)}</option>` : '') + list.map(x => `<option value="${x.id}" ${x.id === val ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
 }
 
-VIEWS.add = () => {
+function addLegacy() {
   const f = form, T = TYPES[f.type] || TYPES.expense, has = k => T.f.includes(k);
   const ab = accountBalances(), pb = personBalances();
   const accOpts = S.accounts.map(a => ({ id: a.id, name: `${a.name} (${money(ab[a.id] || 0)})` }));
@@ -1168,7 +1170,169 @@ VIEWS.add = () => {
   if (tail.length) parts.push(`<div class="form-tail">${tail.join('')}</div>`);
   parts.push(`</div>`);
   return parts.join('');
+}
+
+// ---------------- Add screen (v40): big amount, small chips, category tiles, keypad ----------------
+// Own money on the + screen; money with a person uses the same screen in "person" mode.
+function addMode() {
+  const f = form;
+  const billOnly = f.type === 'expected' && f.direction === 'out' && (f.billOnly || f.editingId);
+  if (billOnly || f.later || f.type === 'expected' || formLocked()) return 'legacy';
+  if (f.kind === 'person' && !f.viaFor) return 'legacy';
+  if (f.dir !== 'move' && (f.forId || f.viaFor || f.kind === 'back')) return 'person';
+  return 'simple';
+}
+const ARROW = {
+  in: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M5 13l7 7 7-7"/></svg>',
+  out: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V4M5 11l7-7 7 7"/></svg>',
+  move: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 20V5M4 9l4-4 4 4M16 4v15M12 15l4 4 4-4"/></svg>'
 };
+function chipSel(label, sel, icon, cls = '') {
+  return `<label class="ach ${cls}">${icon ? svgIcon(icon) : ''}<span>${label}</span>${sel}</label>`;
+}
+function addChips(f, mode) {
+  const T = TYPES[f.type] || TYPES.expense, has = k => T.f.includes(k);
+  const ab = accountBalances(), out = [];
+  const t0 = today(), dl = f.date === t0 ? 'Today' : f.date === addDays(t0, -1) ? 'Yesterday' : fmtShort(f.date);
+  out.push(`<label class="ach">${svgIcon('cal')}<span>${dl}</span><input type="date" data-f="date" value="${esc(f.date)}" aria-label="Date"></label>`);
+  const aOpt = (val, sel) => S.accounts.map(a => `<option value="${val(a)}" ${sel === val(a) ? 'selected' : ''}>${esc(a.name)} (${money(ab[a.id] || 0)})</option>`).join('');
+  if (has('paidFrom')) {
+    const k = f.paidFrom || '', pp = k.startsWith('p:') ? person(k.slice(2)) : null;
+    const label = k === 'old' ? 'Before Hisaab' : pp ? 'Paid by ' + esc(pp.name) : acc(k.slice(2))?.name ? esc(acc(k.slice(2)).name) : 'Paid from';
+    // People holding my money (given to spend for me) can pay from it; "someone else paid for me" lives in People
+    const pb = personBalances(), holders = new Set(live().filter(e => e.type === 'advance').map(e => e.personId));
+    const hold = S.people.filter(p => holders.has(p.id) && (pb[p.id] || 0) > 0);
+    const holdOpts = hold.map(p => `<option value="p:${p.id}" ${k === 'p:' + p.id ? 'selected' : ''}>${esc(p.name)} (holds ${money(pb[p.id])})</option>`).join('');
+    const extraP = pp && !hold.some(p => p.id === pp.id) ? `<option value="${k}" selected>Paid by ${esc(pp.name)}</option>` : '';
+    out.push(chipSel(label, `<select data-f="paidFrom" aria-label="Paid from">${k ? '' : '<option value="" selected>Choose</option>'}<optgroup label="My accounts">${aOpt(a => 'a:' + a.id, k)}</optgroup>${holdOpts ? `<optgroup label="Money I gave them to spend">${holdOpts}</optgroup>` : ''}${extraP}${f.type === 'recoverable' ? `<option value="old" ${k === 'old' ? 'selected' : ''}>Before Hisaab (no account)</option>` : ''}</select>`, pp ? 'users' : 'wallet', k ? '' : 'need'));
+  }
+  if (has('account')) {
+    const old = ['lent', 'borrowed', 'advance', 'received', 'repaid'].includes(f.type);
+    const label = f.accountId === '__old' ? 'Before Hisaab' : acc(f.accountId) ? esc(acc(f.accountId).name) : f.type === 'transfer' ? 'From' : 'Account';
+    out.push(chipSel((f.type === 'transfer' ? 'From ' : '') + label, `<select data-f="accountId" aria-label="Account">${f.accountId ? '' : '<option value="" selected>Choose</option>'}${aOpt(a => a.id, f.accountId)}${old ? `<option value="__old" ${f.accountId === '__old' ? 'selected' : ''}>Before Hisaab (no account)</option>` : ''}</select>`, 'wallet', f.accountId ? '' : 'need'));
+  }
+  if (has('toAccount')) out.push(chipSel('To ' + (acc(f.toAccountId) ? esc(acc(f.toAccountId).name) : '…'), `<select data-f="toAccountId" aria-label="To account"><option value="">Choose</option>${aOpt(a => a.id, f.toAccountId)}</select>`, 'swap', f.toAccountId ? '' : 'need'));
+  if (mode === 'person' && (has('cat'))) {
+    const cats = S.categories.filter(c => c.kind === 'out' && (!c.bill || c.id === f.categoryId));
+    out.push(chipSel(f.categoryId ? esc(catName(f.categoryId)) : 'Category', `<select data-f="categoryId" aria-label="Category"><option value="">None</option>${cats.map(c => `<option value="${c.id}" ${f.categoryId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`, f.categoryId ? catIcon(catName(f.categoryId)) : 'tag'));
+  }
+  if (has('book') && S.books.length) out.push(chipSel(f.bookId && book(f.bookId) ? esc(book(f.bookId).name) : 'Area', `<select data-f="bookId" aria-label="Area"><option value="">No area</option>${S.books.map(b => `<option value="${b.id}" ${f.bookId === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`, 'grid', f.bookId ? '' : 'dim'));
+  const openWorks = S.works.filter(w => !w.closed || w.id === f.workId);
+  if (has('work')) out.push(chipSel(work(f.workId) ? esc(work(f.workId).name) : 'Project', `<select data-f="workId" aria-label="Project"><option value="">No project</option>${openWorks.map(w => `<option value="${w.id}" ${f.workId === w.id ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}<option value="__new">+ New project…</option></select>`, 'folder', f.workId ? '' : 'dim'));
+  if (!ui.noteOpen && !f.note) out.push(`<button type="button" class="ach dim" data-act="noteOpen">${svgIcon('pencil')}<span>Note</span></button>`);
+  if (f.receipt || f.receiptData) out.push(`<button type="button" class="ach" data-act="removeReceipt" aria-label="Remove receipt">${svgIcon('camera')}<span>Receipt ×</span></button>`);
+  let extra = '';
+  if (ui.noteOpen || f.note) extra += `<input class="addnote" data-f="note" value="${esc(f.note)}" placeholder="Note (optional)" maxlength="200" aria-label="Note">`;
+  const vw = work(f.workId);
+  if (vw && vw.vehicle && ['expense', 'recoverable'].includes(f.type)) extra += `<div class="addmini"><input data-f="litres" value="${esc(f.litres || '')}" inputmode="decimal" placeholder="Litres" aria-label="Litres"><input data-f="odo" value="${esc(f.odo || '')}" inputmode="numeric" placeholder="Odometer km" aria-label="Odometer km"></div>`;
+  return `<div class="achips">${out.join('')}</div>${extra}`;
+}
+function keypadHtml(mode, f) {
+  const k = (v, cls = '', label = v, aria = '') => `<button type="button" class="kp ${cls}" data-act="kp" data-k="${v}" ${aria ? `aria-label="${aria}"` : ''}>${label}</button>`;
+  const side = mode === 'person'
+    ? `<button type="button" class="kp side" data-act="toMe" aria-label="Back to my own spending">${svgIcon('wallet')}</button>`
+    : f.dir === 'move' || f.editingId ? '<span class="kp blank"></span>'
+      : `<button type="button" class="kp side" data-act="toPersonPick" aria-label="Money with a person">${svgIcon('users')}</button>`;
+  return `<div class="keypad2">
+    ${k('1')}${k('2')}${k('3')}${k('⌫', 'op', '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H9l-6 7 6 7h12zM18 9l-6 6M12 9l6 6"/></svg>', 'Delete (hold to clear)')}
+    ${k('4')}${k('5')}${k('6')}${k('+', 'op plus', '+', 'Plus')}
+    ${k('7')}${k('8')}${k('9')}${k('-', 'op minus', '−', 'Minus')}
+    ${k('.', '', '.')}${k('0')}${side}<button type="button" class="kp ok" data-act="saveForm" aria-label="${f.editingId && !f.draftId ? 'Update' : 'Save'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
+  </div>`;
+}
+function addTop(mode, f) {
+  const lock = formLocked();
+  let sw;
+  if (mode === 'person') {
+    sw = [['out', 'I gave'], ['in', 'I received']].map(([v, l]) => `<button type="button" class="dsw ${v} ${f.dir === v ? 'on' : ''}" data-act="pDir" data-v="${v}" ${lock ? 'disabled' : ''} aria-label="${l}">${ARROW[v]}${f.dir === v ? `<span>${l}</span>` : ''}</button>`).join('');
+  } else {
+    sw = [['in', 'Income'], ['out', 'Expense'], ['move', 'Transfer']].map(([v, l]) => `<button type="button" class="dsw ${v} ${f.dir === v ? 'on' : ''}" data-act="setDir" data-v="${v}" ${f.editingId && f.dir !== v && (f.type === 'transfer' || v === 'move') ? 'disabled' : ''} aria-label="${l}">${ARROW[v]}${f.dir === v ? `<span>${l}</span>` : ''}</button>`).join('');
+  }
+  return `<div class="addtop"><button type="button" class="icon-btn" data-act="cancelForm" aria-label="Close">✕</button>
+    <div class="dirsw">${sw}</div>
+    <div class="addtop-r">${!f.editingId && mode === 'simple' && f.dir !== 'move' ? `<button type="button" class="icon-btn" data-act="pasteSms" aria-label="Paste bank SMS">${svgIcon('receipt')}</button>` : ''}<button type="button" class="icon-btn" data-act="addMoreSheet" aria-label="More options">⋯</button></div></div>`;
+}
+function amountBlock(f) {
+  return `<div class="abig"><span class="cur">${esc(S.settings.currency || 'Rs')}</span><input id="amt" data-f="amount" inputmode="none" autocomplete="off" placeholder="0" value="${esc(f.amount)}" aria-label="Amount"></div>
+    <div class="amount-preview" id="amtPreview"></div>`;
+}
+function billBanner(f) {
+  const x = S.entries.find(e => e.id === f.linkExpected); if (!x) return '';
+  return `<div class="paybill"><div class="pb-top">${svgIcon(catIcon(x.note || cat(x.categoryId)?.name))}<span>Paying <b>${esc(entryTitle(x))}</b>${x.estimated ? ' · amount is an estimate' : ''}</span><button type="button" class="link small" data-act="unlinkBill">Not this bill</button></div>
+    ${x.ref ? `<div class="refline">Ref <b>${esc(x.ref)}</b> <button type="button" class="btn sm" data-act="copyRef" data-v="${esc(x.ref)}">Copy</button></div>` : ''}
+    <div class="addmini"><input data-f="txId" value="${esc(f.txId || '')}" placeholder="Transaction ID (optional)" autocomplete="off" aria-label="Transaction ID">${billUnitsOk(x) ? `<input data-f="units" value="${esc(f.units || '')}" inputmode="numeric" placeholder="Units" aria-label="Units used">` : ''}</div></div>`;
+}
+function catTiles(f) {
+  const kind = f.dir === 'in' ? 'in' : 'out';
+  const use = {}; live().forEach(e => { if (e.categoryId) use[e.categoryId] = (use[e.categoryId] || 0) + 1; });
+  const cats = S.categories.filter(c => c.kind === kind && (!c.bill || c.id === f.categoryId)).map((c, i) => ({ c, i })).sort((a, b) => (use[b.c.id] || 0) - (use[a.c.id] || 0) || a.i - b.i).map(x => x.c);
+  const bills = kind === 'out' && f.type === 'expense' && !f.linkExpected && !f.editingId
+    ? live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date <= addDays(today(), 7)).sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 2) : [];
+  const all = ui.allCats, slots = 7 - bills.length;
+  let shown = all ? cats : cats.slice(0, slots);
+  if (!all && f.categoryId && !shown.some(c => c.id === f.categoryId)) { const s = cats.find(c => c.id === f.categoryId); if (s) shown = [...shown.slice(0, slots - 1), s]; }
+  const tile = c => `<button type="button" class="ctile ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}">${svgIcon(catIcon(c.name))}<span>${esc(c.name)}</span></button>`;
+  return `<div class="ctiles">${all ? '' : bills.map(e => `<button type="button" class="ctile bill" data-act="useBill" data-id="${e.id}">${svgIcon(catIcon(e.note || cat(e.categoryId)?.name))}<span>${esc(entryTitle(e))}</span><em>due</em></button>`).join('')}${shown.map(tile).join('')}${all
+    ? `<button type="button" class="ctile ghost" data-act="editSimple" data-kind="${kind === 'in' ? 'catin' : 'catout'}" data-fromform="1">${svgIcon('plus')}<span>New</span></button><button type="button" class="ctile ghost" data-act="allCats">${svgIcon('back')}<span>Less</span></button>`
+    : cats.length > shown.length ? `<button type="button" class="ctile ghost" data-act="allCats">${svgIcon('grid')}<span>More</span></button>` : ''}</div>`;
+}
+function whatTiles(f) {
+  const lock = formLocked(), p = person(f.forId), isIn = f.dir === 'in';
+  if (!p) return `<div class="field"><div class="chips kinds">${forPeople('').map(x => `<button type="button" class="chip" data-act="setFor" data-id="${x.id}">${esc(x.name)}</button>`).join('')}<button type="button" class="chip ghost" data-act="forOther">Other…</button></div></div>`;
+  const b = personBalances()[p.id] || 0, nm = esc(p.name), its = isIn ? openItemsOf(p.id) : [];
+  const opts = isIn ? [
+    ...(its.length ? [['items', 'Paying back items', `${esc(entryTitle(its[0]))}${its.length > 1 ? ' +' + (its.length - 1) : ''} · ${money(its.reduce((a, e) => a + recInfo(e).remaining, 0))}`]] : []),
+    holdsForMe(p.id) ? ['paid', 'Returning unused money', `holds ${money(b)} of yours`] : ['paid', 'Paying me back', b > 0 ? `owes you ${money(b)}` : 'money they owed you'],
+    ['lentme', 'Lending me', 'you will return it'],
+    ['paidforme', 'Paid for me', 'a bill or item; you will owe them']]
+    : [['gone', 'Not coming back', 'gift, treat, a fee for them'], ['back', 'Coming back', 'a loan, or office will repay'], ['spend', 'To spend for me', 'they buy things, return change'], ...(b < 0 ? [['repay', 'Paying back what I owe', `you owe ${money(-b)}`]] : [])];
+  return `<div class="wtiles">${opts.map(([k, t, sub]) => `<button type="button" class="wtile ${f.what === k ? 'on' : ''}" data-act="setWhat" data-v="${k}" ${lock ? 'disabled' : ''}><b>${t}</b><span>${sub}</span></button>`).join('')}</div>
+    ${isIn && holdsForMe(p.id) && !f.editingId ? `<button type="button" class="link small spentby" data-act="quickType" data-type="spentBy" data-p="${p.id}">They spent some of it for me ›</button>` : ''}`;
+}
+VIEWS.add = () => {
+  const mode = addMode();
+  if (mode === 'legacy') return addLegacy();
+  const f = form, parts = [`<div class="addv ${mode}" data-dir="${f.dir}">`, addTop(mode, f)];
+  if (mode === 'person') {
+    const p = person(f.forId), b = p ? personBalances()[p.id] || 0 : 0;
+    parts.push(p ? `<div class="pline"><span class="ico av">${esc((p.name.trim()[0] || '?').toUpperCase())}</span><div class="grow"><b>${esc(p.name)}</b><span>${b > 0 ? 'owes you ' + money(b) : b < 0 ? 'you owe ' + money(-b) : 'all settled'}</span></div>${f.editingId ? '' : `<button type="button" class="link small" data-act="forOther">Change</button>`}</div>`
+      : `<div class="pline"><div class="grow"><b>${f.dir === 'in' ? 'From whom?' : 'For whom?'}</b></div></div>`);
+  }
+  parts.push(amountBlock(f));
+  if (f.sms) parts.push(smsBanner(f));
+  if (f.linkExpected && f.type === 'expense') parts.push(billBanner(f));
+  else if (f.txId && !f.sms) parts.push(`<div class="addmini"><input data-f="txId" value="${esc(f.txId)}" placeholder="Transaction ID" aria-label="Transaction ID"></div>`);
+  parts.push(addChips(f, mode));
+  if (mode === 'person') parts.push(whatTiles(f));
+  else if (f.dir !== 'move') parts.push(catTiles(f));
+  if (f.dir === 'in' && f.what === 'items' && mode === 'person') parts.push(`<div class="type-hint">After saving you choose which items this covers.</div>`);
+  parts.push(keypadHtml(mode, f), '</div>');
+  return parts.join('');
+};
+function addMoreSheet() {
+  const f = form, mode = addMode(), isNew = !f.editingId;
+  const b = (act, icon, label, extra = '') => `<button class="opt" data-act="${act}" ${extra}>${svgIcon(icon)}<span>${label}</span></button>`;
+  openSheet(`${sheetHead('More')}<div class="optlist moreopts">
+    ${(f.receipt || f.receiptData) ? b('removeReceipt', 'camera', 'Remove receipt photo') : b('pickReceipt', 'camera', 'Attach receipt photo')}
+    ${isNew && mode === 'simple' ? b('snap', 'camera', 'Snap receipt now, fill details later') : ''}
+    ${isNew && mode === 'simple' && f.dir !== 'move' ? b('pasteSms', 'receipt', 'Paste bank SMS') : ''}
+    ${isNew && mode === 'simple' && f.dir !== 'move' && !f.linkExpected ? b('setLater', 'cal', f.dir === 'out' ? 'Not paid yet (due later)' : 'Not received yet (expected later)') : ''}
+    ${mode === 'person' && has2(f, 'due') ? `<label class="opt dueopt">${svgIcon('cal')}<span>${f.type === 'received' ? 'Rest promised by' : 'Return by'}</span><input type="date" data-f="dueDate" value="${esc(f.dueDate || '')}"></label>` : ''}
+    ${isNew ? b('saveNext', 'plus', 'Save and add another') : ''}
+  </div>`);
+}
+function has2(f, k) { return (TYPES[f.type] || TYPES.expense).f.includes(k); }
+function kpPress(k) {
+  const inp = $('#amt'); if (!inp) return;
+  let v = String(form.amount || '');
+  if (k === '⌫') v = v.slice(0, -1);
+  else if (k === 'C') v = '';
+  else if (k === '+' || k === '-') { if (!v) return; v = /[+\-]$/.test(v) ? v.slice(0, -1) + k : v + k; }
+  else if (k === '.') { const last = v.split(/[+\-]/).pop(); if (last.includes('.')) return; v += last ? '.' : '0.'; }
+  else { const last = v.split(/[+\-]/).pop(); if (last === '0') v = v.slice(0, -1); if (last.replace('.', '').length >= 10) return; v += k; }
+  form.amount = v; inp.value = v; updateAmtPreview(); fitAmount();
+}
+function fitAmount() { const inp = $('#amt'); if (!inp) return; const n = String(inp.value || '0').length; inp.style.fontSize = n > 12 ? '30px' : n > 9 ? '38px' : n > 7 ? '46px' : ''; }
 
 const imgCache = {};
 async function loadImg(id) {
@@ -1487,7 +1651,7 @@ function openMenu() {
   const here = v => (cur.v === v ? ' on' : '');
   const it = (v, icon, label, meta, act) => `<button class="dr-item${here(v)}" ${act || `data-act="go" data-v="${v}"`}>${svgIcon(icon)}<span class="dr-l">${label}</span>${meta !== '' && meta != null ? `<span class="dr-m">${meta}</span>` : ''}</button>`;
   $('#menuPanel').innerHTML = `<div class="dr-head">
-      <div class="dr-brand"><img src="icon.svg?v=39" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
+      <div class="dr-brand"><img src="icon.svg?v=40" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
       <button class="dr-acct ${bad || off ? 'warn' : ''}" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span>${bad || off ? '<span class="dr-dot"></span>' : ''}</button>
     </div>
     <nav class="dr-nav" aria-label="Menu">
@@ -1507,7 +1671,7 @@ function openMenu() {
       ${it('prefs', 'gear', 'Preferences', '')}
       ${it('help', 'help', 'How to use', '')}
     </nav>
-    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v39</p>`;
+    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v40</p>`;
   $('#menu').hidden = false; menuOpen = true; pushHist();
   requestAnimationFrame(() => $('#menu').classList.add('open'));
 }
@@ -2486,27 +2650,28 @@ const HELP = [
   ]],
   ['Everyday spending', [
     ['Add something I paid for myself', `<p><b>+</b> → type the amount → pick a category → <b>Save</b>. Nothing else is needed.</p><p class="ex">Example: Fuel Rs 4,500 from cash. Type 4500, tap <b>Fuel</b>, Paid from <b>Cash</b>, Save.</p>`],
+    ['The Add screen', `<p>The arrows at the top choose the kind: <b class="in">↓ Income</b>, <b class="out">↑ Expense</b>, <b style="color:var(--move)">⇅ Transfer</b> between your own accounts. Type the amount on the keypad, tap a category tile, then <b>✓</b>.</p><p>The small chips under the amount change the date, account, area, project and note. A bill that is due shows as the first tile with a <b>DUE</b> mark; tap it to pay that bill.</p><p>Keypad: <b>⌫</b> deletes one digit, hold it to clear. <b>+</b> and <b>−</b> add up items. The <b>people key</b> moves the amount to a person (loan, money for family, office work); in that mode the <b>wallet key</b> brings it back to your own spending.</p><p><b>⋯</b> top right: receipt photo, snap now and fill later, paste bank SMS, <b>Not paid yet</b> (due later), save and add another.</p>`],
     ['Several items in one entry', `<p>Type them with +: <b>1200+350+80</b>. The app adds them up and shows the total.</p>`],
-    ['Keep a receipt photo', `<p>On the Add screen tap <b>Snap receipt, fill later</b> to take the photo now and add the details later. Or open <b>More details → Attach photo</b> while adding. To send it to someone, open the entry → <b>Share receipt</b>.</p>`],
+    ['Keep a receipt photo', `<p>On the Add screen tap <b>⋯ → Snap receipt now, fill details later</b> to take the photo now and add the details later. Or tap <b>⋯ → Attach receipt photo</b> while adding. To send it to someone, open the entry → <b>Share receipt</b>.</p>`],
     ['Something I enter often (fuel, milk)', `<p>Nothing to set up: after you enter it twice it appears on Home under <b>Add again</b>. Tap it, check the amount, Save. To keep one there always, open any such entry → <b>Pin to Home</b>. <b>Edit</b> next to Add again removes pins. <b>Copy for today</b> in any entry repeats it once.</p>`],
-    ['Area: Home, Office, Car…', `<p>The Area line under the category fills itself from the category: Fuel goes where you usually put fuel (e.g. Car), Grocery goes to Home. It never copies the area of your last entry. With no history it stays <b>None</b>; change it in one tap.</p><p class="ex">Example: Fuel for the govt vehicle → Area <i>Govt vehicle</i>. Next time you tap Fuel, Govt vehicle is already filled.</p>`],
+    ['Area: Home, Office, Car…', `<p>The Area chip under the amount fills itself from the category: Fuel goes where you usually put fuel (e.g. Car), Grocery goes to Home. It never copies the area of your last entry. With no history it stays <b>None</b>; change it in one tap.</p><p class="ex">Example: Fuel for the govt vehicle → Area <i>Govt vehicle</i>. Next time you tap Fuel, Govt vehicle is already filled.</p>`],
     ['I saved or deleted something by mistake', `<p>Right after saving, tap <b>Undo</b> in the message at the bottom. Later, open the entry → <b>Edit</b> or <b>Delete</b>. Deleted entries wait 30 days in <b>☰ → Recently deleted</b>: tap <b>Restore</b> to bring one back.</p>`]
   ]],
   ['Family, friends and loans', [
-    ['I spent on a family member (not coming back)', `<p><b>+</b> → amount → tap <b>For someone else?</b> → pick the person → <b>Not coming back</b> → category → Save. Or open the person in People and tap <b>I gave / paid</b>.</p><p class="ex">Example: Ali's school fee Rs 6,500. It counts as your spending, and Insights → <b>Spent on people</b> shows how much went to Ali this month. Ali owes you nothing.</p>`],
-    ['I lent money', `<p>Open the person in <b>People</b> → <b>I gave / paid</b> → <b>Coming back</b> → Save. (Same from + → <b>For someone else?</b>.) Their page shows "owes you".</p><p class="ex">Example: Lent Kashif Rs 10,000. People shows Kashif owes you Rs 10,000.</p>`],
-    ['I borrowed money', `<p>Open the person → <b>I received</b> → <b>Lending me</b> → Save. (Same from + → Money in → <b>From someone?</b>.) Their page shows "you owe".</p>`],
+    ['I spent on a family member (not coming back)', `<p>Open the person in <b>People</b> → <b>I gave / paid</b> → amount → <b>Not coming back</b> → category chip → ✓. Or on <b>+</b> type the amount and tap the <b>people key</b> on the keypad to pick the person.</p><p class="ex">Example: Ali's school fee Rs 6,500. It counts as your spending, and Insights → <b>Spent on people</b> shows how much went to Ali this month. Ali owes you nothing.</p>`],
+    ['I lent money', `<p>Open the person in <b>People</b> → <b>I gave / paid</b> → <b>Coming back</b> → Save. (Same from + → amount → <b>people key</b>.) Their page shows "owes you".</p><p class="ex">Example: Lent Kashif Rs 10,000. People shows Kashif owes you Rs 10,000.</p>`],
+    ['I borrowed money', `<p>Open the person → <b>I received</b> → <b>Lending me</b> → Save. (Same from + → <b>↓ Income</b> → amount → <b>people key</b>.) Their page shows "you owe".</p>`],
     ['I am paying back what I owe', `<p>Open the person → <b>I gave / paid</b> → <b>Paying back what I owe</b> (shown only when you owe them).</p>`],
     ['Someone paid me back', `<p>Open the person → <b>I received</b> → <b>Paying me back</b>. Or tap <b>Settle up</b> on their page: it fills the exact amount.</p>`],
-    ['A friend paid for me (I owe him)', `<p>Open the friend → <b>I received</b> → <b>Paid something for me</b>, then enter what it was. Or add the spending with + and in <b>Paid from</b> choose <b>Someone else paid for me…</b>. It counts as your spending and shows that you owe him.</p><p class="ex">Example: Kashif paid your dinner Rs 1,200 → Spent +1,200, you owe Kashif Rs 1,200.</p>`],
-    ['I gave someone money to buy things for me', `<p>Open the person → <b>I gave / paid</b> → <b>To spend for me</b>.</p><p>When they tell you what they bought: <b>+ → Money out</b> → the item → <b>Paid from</b>: pick that person (listed under "Money I gave them to spend for me").</p><p>When they return the change: their page → <b>I received</b> → <b>Returning unused money</b>.</p><p class="ex">Example: Gave your brother Rs 5,000 for groceries. He spent Rs 4,200 and returned Rs 800. Spent shows Rs 4,200, and your brother's balance returns to zero.</p>`],
+    ['A friend paid for me (I owe him)', `<p>Open the friend in <b>People</b> → <b>I received</b> → <b>Paid for me</b>, then enter the amount and pick what it was. The account chip shows <b>Paid by</b> the friend. It counts as your spending and shows that you owe him.</p><p class="ex">Example: Kashif paid your dinner Rs 1,200 → Spent +1,200, you owe Kashif Rs 1,200.</p>`],
+    ['I gave someone money to buy things for me', `<p>Open the person → <b>I gave / paid</b> → <b>To spend for me</b>.</p><p>When they tell you what they bought: <b>+</b> → amount → category → tap the account chip and pick that person (listed under "Money I gave them to spend"). Or on their page → <b>I received</b> → <b>They spent some of it for me</b>.</p><p>When they return the change: their page → <b>I received</b> → <b>Returning unused money</b>.</p><p class="ex">Example: Gave your brother Rs 5,000 for groceries. He spent Rs 4,200 and returned Rs 800. Spent shows Rs 4,200, and your brother's balance returns to zero.</p>`],
     ['Which type to choose for a person', `<p>The type only decides which option is already selected when you add money for them. You can change it on any entry.</p><p><b>Family / relative</b>: money you spend on them is not paid back (fees, gifts, treats).<br><b>Friend</b>: money you give is a loan that comes back.<br><b>Spends money for me</b>: you hand them cash to buy things or pay for work for you; they bring back bills or the change.<br><b>Office / company (pays me back)</b>: you spend on their work and they reimburse you.<br><b>Other</b>: shops, landlord, anyone else.</p><p class="ex">Example: Your brother → Family. Your driver who buys fuel with your cash → Spends money for me. Your department → Office / company.</p>`],
     ['See everything with one person', `<p>Open <b>People</b> → tap the name. You see what they owe or you owe, what's still to get back, what you spent on them, and the full history by month.</p>`],
     ['Send a statement on WhatsApp', `<p>Open the person → <b>Share</b> → WhatsApp message or PDF.</p>`],
     ['They promised to pay by a date', `<p>Open the person → <b>Edit</b> → <b>Payment promised by</b>. Home reminds you when the date passes.</p>`]
   ]],
   ['Office money', [
-    ['I paid for office work and will be reimbursed', `<p><b>+</b> → amount → <b>For someone else?</b> → <b>Office</b> → <b>Coming back</b> (already selected for an office) → category → note → Save. It does not count as your spending.</p><p class="ex">Example: Office roof repair Rs 25,000. Office page shows "To get back Rs 25,000".</p>`],
+    ['I paid for office work and will be reimbursed', `<p>Open <b>Office</b> in People → <b>I gave / paid</b> → amount → <b>Coming back</b> (already selected for an office) → category and note chips → ✓. Or on <b>+</b> type the amount and tap the <b>people key</b>. It does not count as your spending.</p><p class="ex">Example: Office roof repair Rs 25,000. Office page shows "To get back Rs 25,000".</p>`],
     ['I paid for office work and will NOT be reimbursed', `<p>Same, but choose <b>Not coming back</b>. It counts as your spending, tagged Office.</p>`],
     ['The office paid me back', `<p>Open Office in People → <b>I received</b> → <b>Paying back items</b> → Save. Then check which items the money covers. Each item closes on its own; a part payment leaves the rest open. If they paid more than the items, the extra reduces what they owe.</p>`],
     ['I will never get it back', `<p>Open the item → <b>Won't get it back</b>. From then on it counts as your own spending.</p>`],
@@ -2517,9 +2682,9 @@ const HELP = [
     ['Track a vehicle (fuel, km per litre)', `<p>Make a project for the vehicle (e.g. "Govt vehicle") and tick <b>This is a vehicle</b>. When you add fuel with that project, type the <b>litres</b> and the <b>odometer</b> reading. The project page then shows km per litre, cost per km, km driven and a fuel log. Repairs on the same project count in the cost per km.</p>`],
     ['My bill amount changes every month', `<p>Pay it once with the real amount. From then on the next bill is <b>estimated</b> (≈) from your history: the same month last year if known, else the average of the last 3. When the bill arrives, open it in <b>Bills</b> and tap <b>Enter bill amount</b>, or just type the real amount when you tap Pay.</p><p>Tap any bill to see every month: average, highest, lowest, last bill vs the one before, units and cost per unit, and whether you paid late.</p><p class="ex">Example: LESCO was Rs 21,500 in March and Rs 6,100 in July. Next March the estimate starts from last March.</p>`],
     ['Reference no. and transaction ID', `<p>Add the <b>Reference / consumer no.</b> from the printed bill once (edit the bill). When you pay, tap <b>Copy</b> and paste it in your bank app.</p><p>After paying, add the bank's <b>Transaction ID</b> and, for electricity, gas or water, the <b>units</b>. Search in All entries finds both.</p>`],
-    ['Add a payment from a bank SMS', `<p>Long-press the bank or wallet SMS → <b>Share</b> → <b>Hisaab</b> (the app must be installed to the home screen). Or copy the SMS and tap <b>Paste bank SMS</b> on Home.</p><p>The amount, date, name, account and transaction ID fill in. Pick the account once for each A/C number; next time it is picked for you. If it matches a bill, the bill is marked paid. Sharing the same SMS twice will not add it twice.</p>`],
+    ['Add a payment from a bank SMS', `<p>Long-press the bank or wallet SMS → <b>Share</b> → <b>Hisaab</b> (the app must be installed to the home screen). Or copy the SMS and on the Add screen tap the <b>receipt icon</b> at the top (or <b>⋯ → Paste bank SMS</b>).</p><p>The amount, date, name, account and transaction ID fill in. Pick the account once for each A/C number; next time it is picked for you. If it matches a bill, the bill is marked paid. Sharing the same SMS twice will not add it twice.</p>`],
     ['I paid a bill from the + button', `<p>When a bill is due within a week, <b>Paying a bill?</b> appears in the form. Tap the bill: the amount fills in and the bill is marked paid. No double counting.</p>`],
-    ['Money I am waiting for (TA, arrears)', `<p><b>Bills → Money coming in → + Add</b>. Or <b>+ → Money in</b> → amount → <b>More details</b> → tick <b>Not received yet</b>. It is listed in Bills under <b>Money coming in</b>; when it arrives tap <b>Received</b>.</p>`]
+    ['Money I am waiting for (TA, arrears)', `<p><b>Bills → Money coming in → + Add</b>. Or <b>+ → ↓ Income</b> → <b>⋯ → Not received yet</b>. It is listed in Bills under <b>Money coming in</b>; when it arrives tap <b>Received</b>.</p>`]
   ]],
   ['Seeing where money went', [
     ['Spending for a week, month or custom dates', `<p>On Home tap the period name (<b>This month ▾</b>) → This week, Last week, Last month, a past month or Custom dates. Use ‹ › to step back and forward.</p>`],
@@ -3378,6 +3543,17 @@ const ACT = {
     go('entries');
   },
   clearEF: () => { ui.entryFilter = null; render(); },
+  kp: el => { if (kpHeld) { kpHeld = false; return; } kpPress(el.dataset.k); },
+  noteOpen: () => { ui.noteOpen = true; render(); setTimeout(() => $('.addnote')?.focus(), 30); },
+  addMoreSheet: () => addMoreSheet(),
+  setLater: () => { closeSheet(); if (formLocked()) return; form.later = true; deriveType(); render(); },
+  pDir: el => { if (el.disabled || formLocked() || form.dir === el.dataset.v) return; form.dir = el.dataset.v; if (form.forId) { form.what = defaultWhat(form.forId, form.dir); applyWhat(); } else { form.kind = form.dir === 'in' ? 'person' : 'back'; form.viaFor = true; deriveType(); } render(); },
+  toMe: () => { if (formLocked()) return; const keep = { amount: form.amount, date: form.date, note: form.note }; Object.assign(form, { forId: '', what: '', viaFor: false, forcedType: '', recoverFrom: '', forOpen: false, kind: form.dir === 'in' ? 'income' : 'me' }, keep); applyWhat(); render(); },
+  toPersonPick: () => {
+    if (!S.people.length) { openPersonEditor(null, 'forId'); return; }
+    openSheet(`${sheetHead(form.dir === 'in' ? 'Money from whom?' : 'Money for whom?')}<p class="muted small" style="margin:-4px 0 10px">The amount you typed is kept.</p><div class="optlist">${S.people.slice().sort((a, b) => a.name.localeCompare(b.name)).map(p => `<button class="opt prow" data-act="setFor" data-id="${p.id}"><span class="ico av">${esc((p.name.trim()[0] || '?').toUpperCase())}</span><span>${esc(p.name)}</span></button>`).join('')}</div>
+      <button class="btn block mt" data-act="forNew">+ New person</button>`);
+  },
   shareMonth: el => openWhatsApp('', monthSummaryText(el.dataset.ym)),
   copyEntry: el => {
     const e = S.entries.find(x => x.id === el.dataset.id); if (!e) return;
@@ -3530,7 +3706,8 @@ const ACT = {
   setFor: el => {
     if (el.disabled || formLocked()) return;
     const id = el.dataset.id || '';
-    form.forId = id; form.what = id ? defaultWhat(id, form.dir) : ''; if (!id) form.forOpen = false;
+    if (form.dir === 'move') form.dir = 'out';
+    form.forId = id; form.what = id ? defaultWhat(id, form.dir) : ''; form.forOpen = !!id;
     closeSheet(); applyWhat(); render();
   },
   setDate: el => { form.date = el.dataset.v; render(); },
@@ -3563,7 +3740,7 @@ const ACT = {
   toggleLater: el => { if (formLocked()) return; form.later = el.checked; deriveType(); render(); },
   setField: el => { form[el.dataset.k] = el.dataset.val; if (el.dataset.k === 'direction') form.categoryId = ''; render(); },
   saveForm: () => saveForm(),
-  saveNext: () => saveForm(true),
+  saveNext: () => { if (sheetOpen) closeSheet(); saveForm(true); },
   wNext: () => {
     readWiz();
     if (wiz.step === 2) {
@@ -3605,9 +3782,9 @@ const ACT = {
     inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
   },
   cancelForm: () => cancelForm(),
-  pickReceipt: () => $('#fileReceipt').click(),
-  removeReceipt: () => { form.receipt = ''; form.receiptData = ''; render(); },
-  snap: () => $('#fileSnap').click(),
+  pickReceipt: () => { if (sheetOpen) closeSheet(); $('#fileReceipt').click(); },
+  removeReceipt: () => { if (sheetOpen) closeSheet(); form.receipt = ''; form.receiptData = ''; render(); },
+  snap: () => { if (sheetOpen) closeSheet(); $('#fileSnap').click(); },
   useTpl: el => {
     const t = S.templates.find(x => x.id === el.dataset.id); if (!t) return;
     const d = t.data;
@@ -3771,6 +3948,11 @@ document.addEventListener('change', e => {
   if (t.dataset.f === 'paidFromWho') { form.paidFrom = t.value ? 'p:' + t.value : 'ask'; render(); return; }
   if (t.dataset.f === 'date' && t.classList.contains('dpick')) { form.date = t.value || today(); render(); return; }
   if (t.dataset.f === 'workId' && t.value === '__new') { t.value = form.workId || ''; openWorkEditor(null, true); return; }
+  if (t.dataset.f && t.closest('.achips')) { // v40 chips: store and redraw so the chip shows the new choice
+    const k = t.dataset.f; form[k] = k === 'date' ? (t.value || today()) : t.value;
+    if (k === 'bookId') form.bookTouched = true;
+    render(); return;
+  }
   if (t.dataset.f && t.tagName === 'SELECT') {
     form[t.dataset.f] = t.value;
     if (t.dataset.f === 'paidFrom') { render(); return; }
@@ -3799,8 +3981,23 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Escape' && sheetOpen) closeSheet();
-  if (e.key === 'Enter' && cur.v === 'add' && e.target.dataset && e.target.dataset.f === 'amount') { e.preventDefault(); saveForm(); }
+  if (e.key === 'Enter' && cur.v === 'add' && e.target.dataset && e.target.dataset.f === 'amount') { e.preventDefault(); saveForm(); return; }
+  // Add screen keypad from a physical keyboard (when not typing in another field)
+  const tg = e.target, typing = tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.tagName === 'SELECT');
+  if (cur.v === 'add' && !sheetOpen && !typing && $('.keypad2') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const k = e.key === 'Backspace' ? '⌫' : e.key === 'Delete' ? 'C' : e.key;
+    if (/^[0-9.+\-]$/.test(k) || k === '⌫' || k === 'C') { e.preventDefault(); kpPress(k); }
+    else if (k === 'Enter') { e.preventDefault(); saveForm(); }
+  }
 });
+// Hold ⌫ to clear the amount
+let kpHold = null, kpHeld = false;
+document.addEventListener('pointerdown', e => {
+  const b = e.target.closest && e.target.closest('.kp[data-k="⌫"]'); if (!b) return;
+  kpHeld = false; clearTimeout(kpHold);
+  kpHold = setTimeout(() => { kpHeld = true; kpPress('C'); if (navigator.vibrate) try { navigator.vibrate(15); } catch (_) {} }, 500);
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => document.addEventListener(t, () => clearTimeout(kpHold), true));
 
 // ---------------- Google Drive auto-backup ----------------
 // Uses Google's OAuth redirect (no popup, no library). Scope drive.file:

@@ -27,10 +27,13 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 5. ☰ > Backup: back up weekly (share the file to Google Drive or WhatsApp yourself).
 
 ## Adding money
-- Everyday (most entries): + > amount > category > Save. Paid from and Date (shows Today) are right there if you need to change them.
-- For family, friends or the office: tap "For someone else?" under the amount, or open the person in People and tap "I gave / paid" or "I received". Then choose what the money is:
-  - Money out: Not coming back (gift, treat, fee you paid for them) · Coming back (loan, or office will reimburse) · To spend for me (they buy things for you and return the change) · Paying back what I owe.
-  - Money in: Paying back items · Paying me back / Returning unused money · Lending me · Paid something for me (you will owe them).
+- **+** opens one clean screen: three colored arrows at the top (green ↓ Income, orange ↑ Expense, blue ⇅ Transfer; only the selected one shows its name), a big amount, a row of small chips (date, account, area, project, note), category tiles and a keypad.
+- Everyday: + > type amount > tap a category tile > ✓. A bill that is due shows as the first tile marked DUE.
+- Keypad: ⌫ deletes (hold to clear), + and − add up items, the people key moves the amount to a person, ✓ saves. A physical keyboard works too (digits, + − . Backspace, Enter).
+- ⋯ (top right): receipt photo, snap now and fill later, paste bank SMS, Not paid yet (due later), save and add another.
+- Money with a person (family, friends, staff, office) lives in **People**: open the person and tap "I gave / paid" or "I received". The same screen opens in person mode with "What is this money?" tiles:
+  - I gave: Not coming back (gift, treat, fee you paid for them) · Coming back (loan, or office will reimburse) · To spend for me · Paying back what I owe.
+  - I received: Paying back items · Paying me back / Returning unused money · Lending me · Paid for me (someone else paid; you owe them).
 - The most likely choice is already selected: family = Not coming back, office = Coming back, spends money for me = To spend for me, friend = Coming back, anyone you owe = Paying back.
 - Settle up on a person's page fills the exact amount and uses the same steps.
 
