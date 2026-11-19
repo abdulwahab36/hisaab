@@ -76,6 +76,17 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - Add form: the 6 most used categories, most used first; "All" / "More…" shows the rest.
 - ☰ menu: icons, Money / Organise / App sections, short values on the right.
 
+## v38
+- Add again: pin any entry (open it → Pin to Home); quick templates are gone. Paste bank SMS and Snap receipt are on the Add screen.
+- To get back now lives in People → Owe me (with "How old"); money you are waiting for (TA, arrears) is in Bills → Money coming in.
+- Accounts: tap one for its statement, month by month, with the balance after every entry; Fix balance, Edit and Export are there.
+- Recently deleted (☰): deleted entries are kept 30 days and can be restored.
+- Export: All entries → Export → Excel (.csv) or PDF. Insights → Share summary on WhatsApp.
+- Entry details: Copy for today, Pin to Home, Share receipt, "all ›" for the category.
+- Bills: Remind me in Calendar (Google Calendar, repeating, 2 days before due).
+- Vehicle projects: tick "This is a vehicle" on a project, type litres and odometer with fuel; the project shows km per litre, cost per km, km driven and a fuel log.
+- Budgets: how much a day keeps you inside the budget.
+
 ## Help inside the app
 ☰ > How to use Hisaab: every task explained in plain steps with examples, with a search box.
 

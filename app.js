@@ -183,6 +183,7 @@ function normalizeState(st) {
   out.settings = { ...d.settings, ...(st.settings || {}) };
   if (!st.settings || st.settings.onboarded === undefined) out.settings.onboarded = true; // existing users skip the welcome
   if (!out.settings.last) out.settings.last = {};
+  if (!Array.isArray(out.trash)) out.trash = [];
   out.categories.forEach((c, i) => { if (!c.color) c.color = PALETTE[i % PALETTE.length]; });
   if (!out.categories.some(c => c.bill)) BILL_TYPES.forEach(([n, c]) => out.categories.push({ id: uid(), name: n, kind: 'out', bill: true, color: c }));
   out.settings.drive = { ...defaultDrive(), ...((st.settings && st.settings.drive) || {}) };
@@ -195,6 +196,9 @@ async function load() {
   await DB.open();
   const st = await DB.get('kv', 'state');
   S = st ? normalizeState(st) : (PREVIEW ? sampleState() : defaultState());
+  if (!Array.isArray(S.trash)) S.trash = [];
+  const cutoff = new Date(Date.now() - 30 * 864e5).toISOString(), gone = S.trash.filter(x => x.deletedAt < cutoff);
+  if (gone.length) { for (const x of gone) if (x.receipt) { try { await DB.del('img', x.receipt); } catch (e) { /* ignore */ } } S.trash = S.trash.filter(x => x.deletedAt >= cutoff); await saveRaw(); }
   if (/[?&]nowelcome/.test(location.search)) S.settings.onboarded = true;
   if (!st) await saveRaw();
 }
@@ -262,13 +266,13 @@ const TYPES = {
   lent:        { label: 'Lent',        hint: 'I gave money, they will return it', f: ['person*', 'account', 'work', 'due', 'note'] },
   borrowed:    { label: 'Borrowed',    hint: 'I took money, I will return it', f: ['person*', 'account', 'due', 'note'] },
   received:    { label: 'Got back',    hint: 'A person returned money (loan or unused advance)', f: ['person*', 'account', 'due', 'note'] },
-  repaid:      { label: 'Paid back',   hint: 'I returned money to a person', f: ['person*', 'account', 'note'] },
-  advance:     { label: 'Advance',     hint: 'Given to someone to spend for you; they report spending later', f: ['person*', 'account', 'work', 'note'] },
+  repaid:      { label: 'I paid back',   hint: 'I returned money to a person', f: ['person*', 'account', 'note'] },
+  advance:     { label: 'Given to spend',     hint: 'Given to someone to spend for you; they report spending later', f: ['person*', 'account', 'work', 'note'] },
   transfer:    { label: 'Transfer',    hint: 'Move money between my accounts', f: ['account', 'toAccount', 'note'] },
   expected:    { label: 'Upcoming',    hint: 'Money due in future: TA, arrears, payouts, bills', f: ['book', 'catAny', 'personOpt', 'repeat', 'note'], dateLabel: 'Due on' }
 };
 const TYPE_ORDER = ['expense', 'recoverable', 'income', 'lent', 'borrowed', 'received', 'repaid', 'advance', 'transfer', 'expected'];
-const SYS_LABEL = { recovery: 'Recovery', adjustment: 'Balance adjustment' };
+const SYS_LABEL = { recovery: 'Paid back to me', adjustment: 'Balance adjustment' };
 const typeLabel = t => (TYPES[t] ? TYPES[t].label : SYS_LABEL[t] || t);
 const PERSON_KINDS = { family: 'Family / relative', friend: 'Friend', staff: 'Spends money for me', org: 'Office / company (pays me back)', other: 'Other' };
 const KIND_HINT = {
@@ -563,8 +567,8 @@ window.addEventListener('popstate', () => {
 
 const TITLES = {
   welcome: 'Hisaab',
-  home: 'Hisaab', people: 'People', add: 'Add entry', pending: 'Pending', more: 'More',
-  person: 'Person', accounts: 'Accounts', books: 'Areas', cats: 'Categories', works: 'Projects', work: 'Project',
+  home: 'Hisaab', people: 'People', add: 'Add entry', pending: 'To get back', more: 'More',
+  person: 'Person', accounts: 'Accounts', books: 'Areas', cats: 'Categories', works: 'Projects', work: 'Project', trash: 'Recently deleted', account: 'Account',
   templates: 'Quick templates', prefs: 'Preferences', budgets: 'Budgets', bills: 'Bills', insights: 'Insights', entries: 'All entries', backup: 'Backup & restore', security: 'App lock', help: 'How to use Hisaab'
 };
 
@@ -589,8 +593,8 @@ function render() {
   $('#backBtn').hidden = stack.length === 0;
   let title = TITLES[cur.v] || 'Hisaab';
   if (cur.v === 'person') title = '';
-  if (cur.v === 'pending') title = ui.pendingSeg === 'exp' ? 'Upcoming' : 'To get back';
-  if (cur.v === 'work') title = '';
+  if (cur.v === 'pending') title = 'Not linked to a person';
+  if (cur.v === 'work' || cur.v === 'account') title = '';
   if (cur.v === 'bill') { const b = billSeries(cur.p).at(-1); title = b ? entryTitle(b) : 'Bill'; }
   if (cur.v === 'add' && form.editingId) title = form.draftId ? 'Complete entry' : 'Edit entry';
   if (cur.v === 'add' && form.type === 'expected' && form.direction === 'out') title = form.editingId ? 'Edit bill' : 'Add bill';
@@ -605,7 +609,7 @@ function render() {
   saveNav();
 }
 // Remember where you are, so pulling down to refresh keeps you on the same screen.
-const NAV_KEEP = ['home', 'people', 'bills', 'insights', 'entries', 'person', 'work', 'works', 'bill', 'budgets', 'accounts', 'books', 'cats', 'prefs', 'backup', 'help', 'pending', 'templates', 'security'];
+const NAV_KEEP = ['account', 'trash', 'home', 'people', 'bills', 'insights', 'entries', 'person', 'work', 'works', 'bill', 'budgets', 'accounts', 'books', 'cats', 'prefs', 'backup', 'help', 'pending', 'templates', 'security'];
 function saveNav() {
   try {
     if (!S.settings.onboarded || !NAV_KEEP.includes(cur.v)) { sessionStorage.removeItem('hisaab_nav'); return; }
@@ -746,7 +750,7 @@ VIEWS.home = () => {
       <button class="plabel" data-act="perPick">${per.label} <span aria-hidden="true">▾</span></button>
       ${P.k === 'custom' ? '' : `<button class="pstep" data-act="perStep" data-d="1" aria-label="Next period" ${per.isCurrent ? 'disabled' : ''}>›</button>`}
     </div>` : '<div class="hb-title">Hisaab</div>'}
-    ${hasAny ? `<button class="hb-btn fire ${sk0.todayOk ? '' : 'pending'}" data-act="streakOpen" aria-label="${sk0.n}-day streak">${svgIcon('flame')}<b>${sk0.n}</b></button>` : '<span class="hb-btn"></span>'}
+    ${hasAny ? `<button class="hb-btn fire ${sk0.todayOk ? '' : 'pending'}" data-act="streakOpen" aria-label="${sk0.n}-day streak">${svgIcon('flame')}${sk0.n >= 2 ? `<b>${sk0.n}</b>` : ''}</button>` : '<span class="hb-btn"></span>'}
   </div>`;
   const hero = !hasAny ? `<div class="summary starter">
       <h2>Start with today's spending</h2>
@@ -775,14 +779,13 @@ VIEWS.home = () => {
   ${shownAlerts.join('')}
   ${alerts.length > 2 ? `<button class="link small" style="margin:-2px 2px 8px" data-act="toggleAlerts">${ui.allAlerts ? 'Show less' : 'Show ' + (alerts.length - 2) + ' more'}</button>` : ''}
 
-  ${hasAny ? `${(() => { const ag = addAgainList(); return `<div class="sec-title">Add again</div>
+  ${hasAny ? `${(() => { const pins = S.templates, pinNames = new Set(pins.map(t => t.name.toLowerCase())), ag = addAgainList().filter(x => !pinNames.has(x.label.toLowerCase())).slice(0, Math.max(0, 6 - pins.length)); return `<div class="sec-title">Add again ${pins.length ? `<button data-act="pinEdit">${ui.pinEdit ? 'Done' : 'Edit'}</button>` : ''}</div>
   <div class="chips quickrow">
-    ${S.templates.map(tp => `<button class="chip" data-act="useTpl" data-id="${tp.id}">${esc(tp.name)}</button>`).join('')}
-    ${ag.map(x => `<button class="chip" data-act="addAgain" data-d='${esc(JSON.stringify(x.d))}'>${svgIcon(catIcon(x.label))}${esc(x.label)} <span class="muted">${money(x.amount)}</span></button>`).join('')}
-    <button class="chip" data-act="snap">${svgIcon('camera')} Snap receipt</button>
-    <button class="chip" data-act="pasteSms">${svgIcon('receipt')} Paste bank SMS</button>
+    ${pins.map(tp => ui.pinEdit ? `<button class="chip pin edit" data-act="unpin" data-id="${tp.id}" aria-label="Unpin ${esc(tp.name)}">${esc(tp.name)} <span aria-hidden="true">×</span></button>`
+      : `<button class="chip pin" data-act="useTpl" data-id="${tp.id}">${svgIcon(catIcon(tp.name))}${esc(tp.name)}${tp.data.amount ? ` <span class="muted">${money(Number(tp.data.amount))}</span>` : ''}</button>`).join('')}
+    ${ui.pinEdit ? '' : ag.map(x => `<button class="chip" data-act="addAgain" data-d='${esc(JSON.stringify(x.d))}'>${svgIcon(catIcon(x.label))}${esc(x.label)} <span class="muted">${money(x.amount)}</span></button>`).join('')}
   </div>
-  ${!ag.length && !S.templates.length ? '<p class="muted small" style="margin:8px 2px 0">Things you enter often will appear here for one-tap entry.</p>' : ''}`; })()}
+  ${!ag.length && !pins.length ? '<p class="muted small" style="margin:8px 2px 0">Things you enter often appear here for one-tap entry. To keep one here always, open it and tap <b>Pin</b>.</p>' : ''}`; })()}
   <div class="sec-title">Recent <button data-act="goEntries" data-filter="">See all ›</button></div>
   <div class="list">${recent.slice(0, 6).map(e => entryItem(e)).join('')}</div>` : ''}`;
 };
@@ -832,6 +835,8 @@ function peopleList() {
   const nOwed = S.people.filter(p => (pb[p.id] || 0) > 0).length, nOwe = S.people.filter(p => (pb[p.id] || 0) < 0).length;
   return `
   <div class="chips" style="margin-bottom:8px">${[['all', 'All', S.people.length], ['owed', 'Owe me', nOwed], ['owe', 'I owe', nOwe]].map(([k, l, n]) => `<button class="chip ${pf === k ? 'on' : ''}" data-act="peopleF" data-v="${k}">${l} (${n})</button>`).join('')}</div>
+  ${pf === 'owed' ? (() => { const am = allocMap(), un = live().filter(e => e.type === 'recoverable' && !e.personId && recInfo(e, am).remaining > 0), unT = r2(un.reduce((a, e) => a + recInfo(e, am).remaining, 0));
+    return `<div class="card owe-age"><div class="iv-h" style="margin:0 0 6px">How old <span>follow up the oldest first</span></div>${ageBarsHtml()}</div>${un.length ? `<button class="list-item card" data-act="openUnassigned"><div class="li-main"><div class="li-title">Not linked to a person</div><div class="li-sub">${un.length} item${un.length > 1 ? 's' : ''} you will get back</div></div><div class="li-amt in">${money(unT)}</div><span class="chev">›</span></button>` : ''}`; })() : ''}
   <div class="psum">${pf === 'owed' ? `${nOwed} ${nOwed === 1 ? 'person owes' : 'people owe'} you <b class="in">${money(owed)}</b>` : pf === 'owe' ? `You owe ${nOwe} ${nOwe === 1 ? 'person' : 'people'} <b class="${owe ? 'out' : ''}">${money(owe)}</b>` : `Owed to you <b class="in">${money(owed)}</b> · You owe <b class="${owe ? 'out' : ''}">${money(owe)}</b>`}</div>
   <div class="row" style="margin-bottom:10px">
     <input class="inp grow" placeholder="Search people" value="${esc(ui.peopleQ)}" data-ui="peopleQ">
@@ -995,7 +1000,7 @@ function resetForm(over = {}) {
     type: 'expense', amount: '', date: today(), paidFrom: L.paidFrom || (S.accounts[0] ? 'a:' + S.accounts[0].id : ''),
     accountId: L.accountId || (S.accounts[0]?.id || ''), toAccountId: '', bookId: '', categoryId: '', workId: '',
     personId: '', recoverFrom: '', dueDate: '', direction: 'in', repeat: '', note: '',
-    receipt: '', receiptData: '', saveTpl: false, tplName: '', txId: '', units: '', billRef: '', sms: null,
+    receipt: '', receiptData: '', saveTpl: false, tplName: '', txId: '', units: '', billRef: '', sms: null, litres: '', odo: '',
     editingId: null, draftId: null, linkExpected: null, returnTo: null, fromQuick: false, forId: '', what: '', viaFor: false, forcedType: '', forOpen: false, ...u, ...over
   };
   if (!form.forId && form.dir === 'out' && form.recoverFrom && ['me', 'back'].includes(form.kind)) { form.forId = form.recoverFrom; form.what = form.kind === 'back' ? 'back' : 'gone'; form.viaFor = true; }
@@ -1014,7 +1019,7 @@ VIEWS.add = () => {
   const parts = [], tail = [];
 
   if (!f.editingId) {
-    parts.push(S.templates.length ? `<div class="chips" style="margin-bottom:12px">${S.templates.map(tp => `<button class="chip" data-act="useTpl" data-id="${tp.id}">${esc(tp.name)}</button>`).join('')}</div>` : '');
+
   }
   const lock = formLocked();
   const billOnly = f.type === 'expected' && f.direction === 'out' && (f.billOnly || f.editingId);
@@ -1038,7 +1043,7 @@ VIEWS.add = () => {
   const forP = person(f.forId);
   const forShown = forMode && (f.forOpen || f.forId || f.kind === 'back');
   if (f.sms) parts.push(smsBanner(f));
-  else if (!f.editingId && !billOnly && !personMode && f.dir !== 'move' && !f.linkExpected && !f.amount) parts.push(`<button type="button" class="link small pastesms" data-act="pasteSms">Paid from a bank app? Paste its SMS</button>`);
+  else if (!f.editingId && !billOnly && !personMode && f.dir !== 'move' && !f.linkExpected && !f.amount) parts.push(`<div class="quickin"><button type="button" class="chip" data-act="pasteSms">${svgIcon('receipt')} Paste bank SMS</button><button type="button" class="chip" data-act="snap">${svgIcon('camera')} Snap receipt, fill later</button></div>`);
   if (forMode && !forShown && !f.later) parts.push(`<button type="button" class="forlink" data-act="forOpen">${f.dir === 'in' ? 'From someone? Loan, money back…' : 'For someone else? Family, friend, office…'}<span>›</span></button>`);
   if (forShown) {
     const isIn = f.dir === 'in';
@@ -1094,8 +1099,10 @@ VIEWS.add = () => {
   // Project: its own visible line once you have an open project (always starts at None, never copied from the last entry)
   const openWorks = S.works.filter(w => !w.closed || w.id === f.workId);
   const projLine = has('work') && openWorks.length > 0 && !(f.type === 'lent' && !f.workId && person(f.personId)?.kind !== 'staff');
+  const vehW = work(f.workId);
   if (projLine) parts.push(`<label class="arealine"><span>Project</span><select class="inp" data-f="workId" aria-label="Project">${opt(openWorks, f.workId, 'None')}<option value="__new">+ New project…</option></select></label>`);
-  if (laterHtml) parts.push(laterHtml);
+  if (vehW && vehW.vehicle && ['expense', 'recoverable'].includes(f.type)) parts.push(`<div class="two veh"><div class="field"><label>Litres <span class="muted">(fuel)</span></label><input data-f="litres" value="${esc(f.litres || '')}" inputmode="decimal" placeholder="e.g. 30"></div><div class="field"><label>Odometer km</label><input data-f="odo" value="${esc(f.odo || '')}" inputmode="numeric" placeholder="e.g. 48250"></div></div>`);
+  if (laterHtml) (f.later ? parts : extra).push(laterHtml);
   if (f.type === 'expense' && !f.forId && !f.linkExpected && !f.editingId) {
     const t1 = today(), lim = addDays(t1, 7);
     const due = live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date <= lim).sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 3);
@@ -1152,10 +1159,8 @@ VIEWS.add = () => {
       ? `<div class="receipt-thumb"><img id="rcptImg" src="${src || ''}" alt="Receipt"><button type="button" data-act="removeReceipt">×</button></div>`
       : `<button type="button" class="btn sm" data-act="pickReceipt">📎 Attach photo</button>`}</div>`);
   }
-  if (!f.editingId || f.draftId) extra.push(`<label class="inline-check"><input type="checkbox" class="check" data-f="saveTpl" ${f.saveTpl ? 'checked' : ''}> Save as quick template (one tap next time)</label>
-    ${f.saveTpl ? `<div class="field"><input data-f="tplName" value="${esc(f.tplName)}" placeholder="Template name, e.g. Govt vehicle fuel"></div>` : ''}`);
   const open = !!S.settings.addMore || !!f.editingId;
-  const filled = [f.note && !billMode ? 'note' : '', (f.receipt || f.receiptData) ? 'receipt' : '', f.workId && work(f.workId) ? work(f.workId).name : ''].filter(Boolean);
+  const filled = [f.note && !billMode ? 'note' : '', (f.receipt || f.receiptData) ? 'receipt' : '', f.workId && work(f.workId) && !projLine ? work(f.workId).name : ''].filter(Boolean);
   parts.push(`<button type="button" class="more-toggle" data-act="toggleAddMore" aria-expanded="${open}"><span>More details${filled.length ? ': ' + esc(filled.join(' · ')) : billMode ? '' : ' (note, receipt)'}</span><span>${open ? '▴' : '▾'}</span></button>`);
   if (open) parts.push(`<div class="more-box">${extra.join('')}</div>`);
   parts.push(`</div>`);
@@ -1231,6 +1236,7 @@ function formToEntry() {
   if (e.type === 'expected' && e.direction === 'out' && (f.billRef || '').trim()) e.ref = f.billRef.trim();
   if ((f.txId || '').trim() && e.type !== 'expected') e.txId = f.txId.trim();
   if (f.linkExpected && Number(f.units) > 0) e.units = Number(f.units);
+  if (work(f.workId)?.vehicle && ['expense', 'recoverable'].includes(e.type)) { if (Number(f.litres) > 0) e.litres = Math.round(Number(f.litres) * 100) / 100; if (Number(f.odo) > 0) e.odo = Math.round(Number(f.odo)); }
   if (e.type === 'lent' || e.type === 'received') {
     const old = f.editingId ? S.entries.find(x => x.id === f.editingId) : null;
     const grp = e.type === 'lent' ? ['lent', 'advance', 'repaid'] : ['received', 'borrowed'];
@@ -1245,7 +1251,7 @@ function formToEntry() {
   return e;
 }
 
-const DIFF_KEYS = ['txId', 'units', 'ref', 'type', 'amount', 'date', 'oldEntry', 'accountId', 'toAccountId', 'viaPersonId', 'bookId', 'categoryId', 'workId', 'personId', 'dueDate', 'direction', 'repeat', 'note', 'receipt'];
+const DIFF_KEYS = ['litres', 'odo', 'txId', 'units', 'ref', 'type', 'amount', 'date', 'oldEntry', 'accountId', 'toAccountId', 'viaPersonId', 'bookId', 'categoryId', 'workId', 'personId', 'dueDate', 'direction', 'repeat', 'note', 'receipt'];
 function diffEntry(a, b) {
   const ch = {};
   for (const k of DIFF_KEYS) { const x = a[k] ?? '', y = b[k] ?? ''; if (x !== y) ch[k] = [x, y]; }
@@ -1310,10 +1316,7 @@ async function saveForm(again = false) {
   if (e.dueDate && e.personId && person(e.personId)) person(e.personId).dueDate = e.dueDate;
   if (e.categoryId && e.bookId) { S.settings.areaByCat = S.settings.areaByCat || {}; S.settings.areaByCat[e.categoryId] = e.bookId; }
 
-  if (f.saveTpl) {
-    const name = (f.tplName || '').trim() || entryTitle(e);
-    S.templates.push({ id: uid(), name, data: { type: e.type, amount: f.amount && !/[+\-*/]/.test(f.amount) ? String(e.amount) : '', paidFrom: f.paidFrom, accountId: f.accountId, toAccountId: f.toAccountId, bookId: e.bookId || '', categoryId: e.categoryId || '', workId: e.workId || '', personId: f.personId, recoverFrom: f.recoverFrom, note: e.note, direction: f.direction } });
-  }
+
   S.settings.last = { ...S.settings.last, paidFrom: (f.paidFrom && f.paidFrom !== 'old') ? f.paidFrom : S.settings.last.paidFrom, accountId: (f.accountId && f.accountId !== '__old') ? f.accountId : S.settings.last.accountId, bookId: f.bookId || S.settings.last.bookId };
 
   await save();
@@ -1362,7 +1365,7 @@ function editEntry(id) {
     workId: e.workId || '', personId: e.type === 'recoverable' ? '' : (e.personId || ''), recoverFrom: e.type === 'recoverable' ? (e.personId || '') : e.type === 'expense' ? (e.spentOn || '') : '',
     dueDate: e.dueDate || '', direction: e.direction || 'in', repeat: e.repeat || '', receipt: e.receipt || '',
     editingId: e.id, draftId: e.draft ? e.id : null, linkExpected: e.linkExpected || null,
-    txId: e.txId || '', units: e.units ? String(e.units) : '', billRef: e.ref || ''
+    txId: e.txId || '', units: e.units ? String(e.units) : '', billRef: e.ref || '', litres: e.litres ? String(e.litres) : '', odo: e.odo ? String(e.odo) : ''
   };
   if (!over.paidFrom) over.paidFrom = (S.settings.last.paidFrom || (S.accounts[0] ? 'a:' + S.accounts[0].id : ''));
   if (!over.accountId) over.accountId = S.settings.last.accountId || S.accounts[0]?.id || '';
@@ -1401,8 +1404,7 @@ function closeExpected(x) {
 // ---------------- Pending view ----------------
 VIEWS.pending = () => {
   const seg = ui.pendingSeg;
-  const head = `<div class="seg"><button class="${seg === 'rec' ? 'on' : ''}" data-act="seg" data-seg="rec">To get back</button><button class="${seg === 'exp' ? 'on' : ''}" data-act="seg" data-seg="exp">Upcoming</button></div>`;
-  return head + (seg === 'rec' ? pendingRec() : pendingExp());
+  return pendingRec();
 };
 
 function pendingRec() {
@@ -1487,7 +1489,7 @@ function openMenu() {
   const here = v => (cur.v === v ? ' on' : '');
   const it = (v, icon, label, meta, act) => `<button class="dr-item${here(v)}" ${act || `data-act="go" data-v="${v}"`}>${svgIcon(icon)}<span class="dr-l">${label}</span>${meta !== '' && meta != null ? `<span class="dr-m">${meta}</span>` : ''}</button>`;
   $('#menuPanel').innerHTML = `<div class="dr-head">
-      <div class="dr-brand"><img src="icon.svg?v=37" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
+      <div class="dr-brand"><img src="icon.svg?v=38" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
       <button class="dr-acct ${bad || off ? 'warn' : ''}" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span>${bad || off ? '<span class="dr-dot"></span>' : ''}</button>
     </div>
     <nav class="dr-nav" aria-label="Menu">
@@ -1495,11 +1497,11 @@ function openMenu() {
       ${it('budgets', 'pie', 'Budgets', bt ? (bt.left >= 0 ? shortMoney(bt.left) + ' left' : '<span class="danger">' + shortMoney(-bt.left) + ' over</span>') : 'Set up')}
       ${it('accounts', 'wallet', 'Accounts', shortMoney(cash))}
       ${it('entries', 'list', 'All entries', live().length, 'data-act="goEntries" data-filter=""')}
+      ${(S.trash || []).length ? it('trash', 'back', 'Recently deleted', S.trash.length) : ''}
       <div class="dr-sep"></div><div class="dr-sec">Organise</div>
       ${it('works', 'folder', 'Projects', S.works.filter(w => !w.closed).length || '')}
       ${it('books', 'grid', 'Areas', S.books.length)}
       ${it('cats', 'tag', 'Categories', S.categories.length)}
-      ${it('templates', 'zap', 'Quick templates', S.templates.length || '')}
       <div class="dr-sep"></div><div class="dr-sec">App</div>
       ${it('backup', 'cloud', 'Backup & restore', bad ? '<span class="danger">Paused</span>' : d.connected ? 'On' : '<span class="warn">Off</span>')}
       ${it('security', 'shield', 'App lock', S.settings.pinHash ? 'On' : 'Off')}
@@ -1507,7 +1509,7 @@ function openMenu() {
       ${it('prefs', 'gear', 'Preferences', '')}
       ${it('help', 'help', 'How to use', '')}
     </nav>
-    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v37</p>`;
+    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v38</p>`;
   $('#menu').hidden = false; menuOpen = true; pushHist();
   requestAnimationFrame(() => $('#menu').classList.add('open'));
 }
@@ -1553,7 +1555,7 @@ VIEWS.budgets = () => {
   </button>`;
   const total = rows.find(r => r.k === 'total'), others = rows.filter(r => r.k !== 'total');
   return `<p class="muted small" style="margin:0 2px 12px">${monthLabel(ym)} · ${daysLeft} day${daysLeft !== 1 ? 's' : ''} left. The line on each bar shows how far through the month you are.</p>
-  ${total ? row(total) : `<button class="bud empty-b" data-act="editBudget" data-k="total"><b>Set a monthly budget</b><span class="muted small">A limit for all your own spending each month</span></button>`}
+  ${total ? row(total) + (total.left > 0 && daysLeft > 0 ? `<p class="bud-day">About <b>${money(Math.floor(total.left / (daysLeft + 1)))}</b> a day for the rest of ${monthLabel(ym).split(' ')[0]} keeps you inside the budget.</p>` : total.left <= 0 ? `<p class="bud-day danger">Budget used up. Every rupee from now is over.</p>` : '') : `<button class="bud empty-b" data-act="editBudget" data-k="total"><b>Set a monthly budget</b><span class="muted small">A limit for all your own spending each month</span></button>`}
   ${others.length ? `<div class="sec-title">By category and area</div>${others.sort((a, b) => b.pct - a.pct).map(row).join('')}` : ''}
   <button class="btn block mt" data-act="editBudget">+ Budget for a category or area</button>
   <p class="muted small mt">Budgets count only your own spending, the same as "Spent" on Home. Money you paid for others is not included.</p>`;
@@ -1595,18 +1597,54 @@ function openPrefSheet(k) {
   if (k === 'num') { title = 'Number style'; body = opt('lakh', 'Lakh · 12,50,000', st.numStyle !== 'intl') + opt('intl', 'International · 1,250,000', st.numStyle === 'intl'); }
   openSheet(`${sheetHead(title)}<div class="optlist">${body}</div>`);
 }
+// Effect of one entry on one account (+ in, − out, 0 none) — same rules as accountBalances
+function accEffect(e, id) {
+  const a = e.amount;
+  switch (e.type) {
+    case 'income': case 'borrowed': case 'received': case 'recovery': return e.accountId === id ? a : 0;
+    case 'expense': case 'recoverable': return !e.viaPersonId && e.accountId === id ? -a : 0;
+    case 'lent': case 'advance': case 'repaid': return e.accountId === id ? -a : 0;
+    case 'transfer': return (e.accountId === id ? -a : 0) + (e.toAccountId === id ? a : 0);
+    case 'adjustment': return e.accountId === id ? a : 0;
+  }
+  return 0;
+}
 VIEWS.accounts = () => {
-  const ab = accountBalances();
-  return `<div class="btn-row" style="margin-bottom:12px">
-    <button class="btn" data-act="editAccount">+ Account</button>
-    <button class="btn" data-act="quickType" data-type="transfer">Transfer</button>
-  </div>
-  <div class="card flush">${S.accounts.map(a => `<div class="list-item">
-    <div class="li-main"><div class="li-title">${esc(a.name)}</div><div class="li-sub">Opening ${money(a.opening || 0)}</div></div>
-    <div class="li-amt ${(ab[a.id] || 0) < 0 ? 'danger' : ''}">${money(ab[a.id] || 0)}
-      <div><button class="btn sm" data-act="balanceCheck" data-id="${a.id}">Fix balance</button> <button class="btn sm" data-act="editAccount" data-id="${a.id}">Edit</button></div></div>
-  </div>`).join('') || '<div class="empty">No accounts.</div>'}</div>
-  <p class="muted small mt"><b>Fix balance</b>: enter what is actually in the wallet/bank. If it differs, one adjustment entry fixes the balance. Do this monthly.</p>`;
+  const ab = accountBalances(), tot = r2(Object.values(ab).reduce((x, y) => x + y, 0));
+  return `<div class="psum">Total in all accounts <b>${money(tot)}</b></div>
+  <div class="row" style="margin-bottom:10px"><button class="btn grow" data-act="quickType" data-type="transfer">Transfer</button><button class="btn primary" data-act="editAccount">+ Account</button></div>
+  <div class="list">${S.accounts.map(a => `<button class="list-item" data-act="go" data-v="account" data-p="${a.id}">
+    <span class="ico av" aria-hidden="true">${svgIcon('wallet')}</span>
+    <div class="li-main"><div class="li-title">${esc(a.name)}</div></div>
+    <div class="li-amt ${(ab[a.id] || 0) < 0 ? 'danger' : ''}">${money(ab[a.id] || 0)}</div><span class="chev" aria-hidden="true">›</span></button>`).join('') || '<div class="empty">No accounts.</div>'}</div>
+  <p class="muted small mt">Tap an account for its statement with the balance after every entry. Check it against your bank app once a month; if it differs, use <b>Fix balance</b> there.</p>`;
+};
+VIEWS.account = (id) => {
+  const a = acc(id); if (!a) return '<div class="empty">Not found.</div>';
+  if (ui.accFor !== id) { ui.accFor = id; ui.accMonth = null; }
+  const ym = ui.accMonth || today().slice(0, 7), [f, to] = monthBounds(ym);
+  const rows = live().filter(e => accEffect(e, id) !== 0).sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : (x.createdAt || '') < (y.createdAt || '') ? -1 : 1));
+  let bal = Number(a.opening) || 0, open = null; const inMonth = [];
+  for (const e of rows) { if (e.date < f) { bal = r2(bal + accEffect(e, id)); continue; } if (open === null) open = bal; bal = r2(bal + accEffect(e, id)); if (e.date <= to) inMonth.push({ e, bal }); }
+  if (open === null) open = bal;
+  const close = inMonth.length ? inMonth[inMonth.length - 1].bal : open;
+  const inT = r2(inMonth.reduce((x, r) => x + Math.max(0, accEffect(r.e, id)), 0)), outT = r2(inMonth.reduce((x, r) => x + Math.max(0, -accEffect(r.e, id)), 0));
+  const now = accountBalances()[id] || 0, isNow = ym === today().slice(0, 7);
+  let lastD = '', list = '';
+  for (const r of inMonth.slice().reverse()) {
+    if (r.e.date !== lastD) { list += `<div class="pj-month">${fmtDate(r.e.date)}</div>`; lastD = r.e.date; }
+    const v = accEffect(r.e, id);
+    list += `<button class="list-item" data-act="openEntry" data-id="${r.e.id}">${entryIcon(r.e)}<div class="li-main"><div class="li-title">${esc(entryTitle(r.e))}</div><div class="li-sub">${esc(entrySub(r.e))}</div></div>
+      <div class="li-amt ${v > 0 ? 'in' : 'out'}">${v > 0 ? '+' : '−'}${money(Math.abs(v))}<div class="li-sub">bal ${money(r.bal)}</div></div></button>`;
+  }
+  return `<div class="phero"><span class="ico av lg" aria-hidden="true">${svgIcon('wallet')}</span>
+    <div class="grow"><h2>${esc(a.name)}</h2><div class="muted small">Opening ${money(a.opening || 0)}</div>
+    <div class="hlinks"><button class="link" data-act="balanceCheck" data-id="${id}">Fix balance</button><span>·</span><button class="link" data-act="editAccount" data-id="${id}">Edit</button><span>·</span><button class="link" data-act="exportAcc" data-id="${id}">Export</button></div></div></div>
+  <div class="pbal"><span class="lbl">Balance now</span><b class="${now < 0 ? 'out' : ''}">${money(now)}</b></div>
+  <div class="iv-month"><button class="icon-btn" data-act="accMonth" data-n="-1" aria-label="Previous month">‹</button><b>${monthLabel(ym)}</b><button class="icon-btn" data-act="accMonth" data-n="1" aria-label="Next month" ${isNow ? 'disabled' : ''}>›</button></div>
+  <div class="iv-stats pj-stats"><div><span>Start</span><b>${money(open)}</b></div><div><span>In</span><b class="in">${money(inT)}</b></div><div><span>Out</span><b class="out">${money(outT)}</b></div></div>
+  <div class="psum" style="margin-top:-4px">End of ${monthLabel(ym).split(' ')[0]}: <b>${money(close)}</b></div>
+  <div class="list">${list || '<div class="empty">No money moved in or out this month.</div>'}</div>`;
 };
 
 function simpleList(kind, items, sub, colored) {
@@ -1673,6 +1711,27 @@ VIEWS.works = () => {
     : `<div class="empty">${q ? 'No match.' : pf === 'done' ? 'No finished projects.' : 'No projects yet. Tap + Project to group the costs of one job, site or event.'}</div>`}</div>`;
 };
 
+// Vehicle projects: fuel log from litres + odometer on entries
+function vehicleHtml(st) {
+  const es = st.entries.filter(e => e.type === 'expense' || e.type === 'recoverable');
+  const reads = es.filter(e => e.odo > 0).sort((a, b) => a.odo - b.odo);
+  const fills = es.filter(e => e.litres > 0).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.odo || 0) - (b.odo || 0)));
+  const litres = r2(fills.reduce((a, e) => a + e.litres, 0)), fuelCost = r2(fills.reduce((a, e) => a + e.amount, 0));
+  const km = reads.length >= 2 ? reads[reads.length - 1].odo - reads[0].odo : 0;
+  const usedL = r2(fills.filter(e => e.odo > reads[0]?.odo).reduce((a, e) => a + e.litres, 0));
+  const kmpl = km && usedL ? km / usedL : 0, perKm = km ? st.total / km : 0;
+  if (!fills.length && !reads.length) return `<section class="iv-card"><div class="iv-h">Vehicle</div><p class="muted small">When you add fuel for this project, type the <b>litres</b> and the <b>odometer</b> reading. You will see km per litre, cost per km and a fuel log here.</p></section>`;
+  let prev = null; const log = fills.slice().map(e => { const r = { e, dkm: prev && e.odo && prev.odo ? e.odo - prev.odo : 0 }; if (e.odo) prev = e; return r; }).reverse().slice(0, 12);
+  return `<section class="iv-card"><div class="iv-h">Vehicle</div>
+    <div class="iv-tiles">
+      <div class="iv-tile"><span class="iv-tl">Km per litre</span><b>${kmpl ? kmpl.toFixed(1) : '—'}</b><span class="iv-tm"><span>${kmpl ? 'average' : 'needs 2 readings'}</span></span></div>
+      <div class="iv-tile"><span class="iv-tl">Cost per km</span><b>${perKm ? money(Math.round(perKm * 10) / 10) : '—'}</b><span class="iv-tm"><span>all costs</span></span></div>
+      <div class="iv-tile"><span class="iv-tl">Km driven</span><b>${km ? km.toLocaleString('en-PK') : '—'}</b><span class="iv-tm"><span>${reads.length ? 'last ' + reads[reads.length - 1].odo.toLocaleString('en-PK') : ''}</span></span></div>
+      <div class="iv-tile"><span class="iv-tl">Fuel</span><b>${litres} L</b><span class="iv-tm"><span>${litres ? money(Math.round(fuelCost / litres)) + ' / L' : ''}</span></span></div>
+    </div>
+    ${log.length ? `<div class="veh-log">${log.map(({ e, dkm }) => `<button class="veh-row" data-act="openEntry" data-id="${e.id}"><span>${fmtShort(e.date)}</span><span>${e.litres} L</span><span>${e.odo ? e.odo.toLocaleString('en-PK') + ' km' : '—'}</span><span>${dkm > 0 ? (dkm / e.litres).toFixed(1) + ' km/L' : ''}</span><b>${money(e.amount)}</b></button>`).join('')}</div>` : ''}
+  </section>`;
+}
 VIEWS.work = (wid) => {
   const w = work(wid);
   if (!w) return '<div class="empty">Not found.</div>';
@@ -1719,6 +1778,7 @@ VIEWS.work = (wid) => {
   ${st.own && st.rec ? `<div class="pj-split"><div class="iv-split"><i class="own" style="width:${ownPct}%"></i><i class="rec" style="width:${100 - ownPct}%"></i></div>
     <div class="iv-legend"><span><i class="k-own"></i>My own ${money(st.own)}</span><span><i class="k-rec"></i>To be repaid ${money(st.rec)}</span></div></div>` : ''}
   ${withPeople ? `<p class="iv-pace">Cash still with your people: <b>${money(withPeople)}</b>. Ask them for bills or the change.</p>` : ''}
+  ${w.vehicle ? vehicleHtml(st) : ''}
   ${cats.length ? `<section class="iv-card"><div class="iv-h">What it went on</div>${cats.length > 1 ? `<div class="iv-donut-wrap">${ivDonut(slices, st.total)}</div>` : ''}
     <div class="iv-list">${slices.map(sl => `<div class="iv-row"><i class="iv-sw" style="background:${sl.color}"></i><span class="grow"><span class="iv-rn">${esc(sl.name)}</span></span><span class="iv-rv"><b>${money(sl.v)}</b><span>${Math.round(sl.v / st.total * 100)}%</span></span></div>`).join('')}</div></section>` : ''}
   ${months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, months[months.length - 1].m)}</section>` : ''}
@@ -1733,8 +1793,7 @@ VIEWS.templates = () => `<div class="card flush">${S.templates.map(t => `<div cl
   <div class="li-main"><div class="li-title">${esc(t.name)}</div><div class="li-sub">${typeLabel(t.data.type)}${t.data.amount ? ' · ' + money(t.data.amount) : ''}</div></div>
   <button class="btn sm" data-act="renameTpl" data-id="${t.id}">Rename</button> <button class="btn sm danger" data-act="delTpl" data-id="${t.id}">Delete</button></div>`).join('') || '<div class="empty">No templates. On the Add screen, tick "Save as quick template".</div>'}</div>`;
 
-VIEWS.entries = () => {
-  const F = ui.entryFilter || (ui.entryFilter = { month: today().slice(0, 7), type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false });
+function filteredEntries(F) {
   let list = S.entries.filter(e => F.drafts ? e.draft : !e.draft);
   if (!F.drafts) {
     if (F.month) list = list.filter(e => e.date.slice(0, 7) === F.month || (F.spentOnly && e.writtenOff && e.writtenOff.date.slice(0, 7) === F.month));
@@ -1748,6 +1807,11 @@ VIEWS.entries = () => {
   }
   if (F.q) { const q = F.q.toLowerCase(); list = list.filter(e => (entryTitle(e) + ' ' + entrySub(e) + ' ' + e.amount + ' ' + (e.txId || '') + ' ' + (e.ref || '')).toLowerCase().includes(q)); }
   list.sort(sortDesc);
+  return list;
+}
+VIEWS.entries = () => {
+  const F = ui.entryFilter || (ui.entryFilter = { month: today().slice(0, 7), type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false });
+  const list = filteredEntries(F);
   const chip = (k, label) => `<button class="ef-chip on" data-act="efDrop" data-k="${k}" aria-label="Remove filter ${esc(label)}">${esc(label)}<span aria-hidden="true">×</span></button>`;
   const active = [];
   if (F.drafts) active.push(chip('drafts', 'Incomplete receipts'));
@@ -1768,7 +1832,7 @@ VIEWS.entries = () => {
   return `<div class="ef-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="inp" type="search" placeholder="Search note, person, amount…" value="${esc(F.q)}" data-ef="q" aria-label="Search entries"></div>
   ${period}
   <div class="ef-chips">${F.drafts ? '' : `<button class="ef-chip filter ${nMore ? 'has' : ''}" data-act="efSheet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filter${nMore ? ' · ' + nMore : ''}</button>`}${active.join('')}${F.month && !F.drafts ? `<button class="ef-chip" data-act="efAllTime">All dates</button>` : ''}</div>
-  <div class="ef-sum"><span>${list.length} entr${list.length === 1 ? 'y' : 'ies'}</span>${outT ? `<span>Out <b class="out">${money(outT)}</b></span>` : ''}${inT ? `<span>In <b class="in">${money(inT)}</b></span>` : ''}${active.length ? `<button class="link" data-act="clearEF">Clear all</button>` : ''}</div>
+  <div class="ef-sum"><span>${list.length} entr${list.length === 1 ? 'y' : 'ies'}</span>${list.length ? '<button class="link" data-act="exportEntries">Export</button>' : ''}${outT ? `<span>Out <b class="out">${money(outT)}</b></span>` : ''}${inT ? `<span>In <b class="in">${money(inT)}</b></span>` : ''}${active.length ? `<button class="link" data-act="clearEF">Clear all</button>` : ''}</div>
   <div class="card flush">${list.length ? list.map(e => entryItem(e)).join('') : `<div class="empty">No entries match.${active.length || F.q ? ' <button class="link" data-act="clearEF">Clear filters</button>' : ''}</div>`}</div>`;
 };
 function efSheetHtml() {
@@ -1800,7 +1864,7 @@ function incomeDueHtml() {
     <button class="li-main" style="text-align:left" data-act="openEntry" data-id="${e.id}"><div class="li-title">${esc(entryTitle(e))}</div>
     <div class="li-sub ${od ? 'danger' : ''}">${od ? 'Was due ' : 'Expected '}${fmtShort(e.date)}${REPEAT_LBL[e.repeat] ? ' · ' + REPEAT_LBL[e.repeat] : ''}</div></button>
     <div class="li-amt in">${money(expectedInfo(e).rem)}<div><button class="btn sm" data-act="payExpected" data-id="${e.id}">Received</button></div></div></div>`; };
-  return `<div class="sec-title">Income expected <button data-act="quickType" data-type="expected">+ Add</button></div>
+  return `<div class="sec-title">Money coming in <button data-act="quickType" data-type="expected">+ Add</button></div>
   <div class="card flush">${items.length ? items.map(row).join('') : '<div class="empty small">TA claims, arrears or payouts you are waiting for. Tap "+ Add".</div>'}</div>`;
 }
 function billsList() {
@@ -1833,6 +1897,7 @@ function billsList() {
     <button class="btn primary sm" data-act="addBill" aria-label="Add bill">+ Add</button>
   </div>
   ${filt === 'unpaid' ? unpaidHtml : filt === 'paid' ? paidHtml : myBillsHtml()}
+  ${filt === 'unpaid' ? incomeDueHtml() : ''}
   <p class="muted small mt">${filt === 'mine' ? 'Tap a bill to see every month: amounts, units, highest and lowest, and when you paid.' : 'Bill amount changes every month? The next bill is estimated from your history. Tap a bill to enter the real amount or see past months.'}</p>`;
 }
 
@@ -1994,10 +2059,17 @@ VIEWS.bill = (sid) => {
     ${now}${tiles}${chart}
     <div class="iv-h" style="margin-top:6px">History</div>
     <div class="card flush">${hist}</div>
-    <div class="btn-row mt"><button class="btn" data-act="editEntry" data-id="${x.id}">Edit bill</button></div>
+    <div class="btn-row mt"><button class="btn" data-act="editEntry" data-id="${x.id}">Edit bill</button>${openC ? `<a class="btn" href="${billCalUrl(openC.b)}" target="_blank" rel="noopener">Remind me in Calendar</a>` : ''}</div>
     ${!unitsRows.length && billUnitsOk(x) ? '<p class="iv-foot">Tip: type the units from the bill when you pay. You will see units and cost per unit here.</p>' : ''}
   </div>`;
 };
+function billCalUrl(b) {
+  const rem = addDays(b.date, -2) < today() ? b.date : addDays(b.date, -2), d = rem.replace(/-/g, ''), d2 = addDays(rem, 1).replace(/-/g, '');
+  const R = { weekly: 'FREQ=WEEKLY', monthly: 'FREQ=MONTHLY', '2m': 'FREQ=MONTHLY;INTERVAL=2', '3m': 'FREQ=MONTHLY;INTERVAL=3', '6m': 'FREQ=MONTHLY;INTERVAL=6', yearly: 'FREQ=YEARLY' }[b.repeat];
+  const p = new URLSearchParams({ action: 'TEMPLATE', text: 'Pay ' + entryTitle(b), dates: d + '/' + d2, details: `Due ${fmtDate(b.date)}${b.ref ? '\nRef: ' + b.ref : ''}\nAbout ${money(b.amount)}. Record it in Hisaab after paying.` });
+  if (R) p.set('recur', 'RRULE:' + R);
+  return 'https://calendar.google.com/calendar/render?' + p.toString();
+}
 function myBillsHtml() {
   const rows = allBillSids().map(({ sid, latest }) => {
     const cyc = billCycles(sid), paid = cyc.filter(c => c.paid > 0), l3 = paid.slice(-12);
@@ -2111,7 +2183,7 @@ VIEWS.insights = () => {
     <b>${monthLabel(ym)}</b>
     <button class="icon-btn" data-act="insMove" data-n="1" aria-label="Next month" ${isNow ? 'disabled' : ''}>›</button></div>${ivTabs(tab)}`;
   const body = tab === 'projects' ? ivProjects(ym) : tab === 'people' ? ivPeople(ym) : ivOverview(ym);
-  return head + `<div class="iv-body">${body}</div>`;
+  return head + `<div class="iv-body">${body}${tab === 'overview' && spendMonth(ym).total ? `<button class="btn block" data-act="shareMonth" data-ym="${ym}">Share ${monthLabel(ym).split(' ')[0]} summary on WhatsApp</button>` : ''}</div>`;
 };
 
 function ivOverview(ym) {
@@ -2437,17 +2509,15 @@ const HELP = [
   ['Start here', [
     ['What is Hisaab for?', `<p>Hisaab keeps <b>your own spending</b> separate from money that only passes through your hands: loans, money the office will pay back, money you give someone to spend for you. So "Spent" always shows what really came out of your pocket.</p>`],
     ['First 5 minutes', `<ol><li>Open <b>☰ → Accounts</b> and type how much is in Cash, Bank, Easypaisa, JazzCash today.</li><li>Open <b>People</b> and add your family, friends, colleagues and the office. Pick the right type for each (see <b>Which type to choose for a person</b>).</li><li>Open <b>☰ → Areas</b> and add parts of your life you want totals for, e.g. <i>Home, Office, Car, Govt vehicle, Cat</i>.</li><li>Set up <b>☰ → Backup</b> so you never lose your records.</li></ol>`],
-    ['The 4 tabs at the bottom', `<p><b>Home</b>: what you spent this period, alerts, recent entries.<br><b>People</b>: everyone you deal with and who owes whom.<br><b>+</b>: add anything.<br><b>Bills</b>: monthly bills, paid and unpaid.<br><b>Insights</b>: where your money went.</p><p><b>☰</b> (top left of Home) has everything else: budgets, accounts, backup, settings. <b>🔥</b> (top right) is your streak.</p>`]
+    ['The 4 tabs at the bottom', `<p><b>Home</b>: what you spent this period, alerts, recent entries.<br><b>People</b>: everyone you deal with and who owes whom.<br><b>+</b>: add anything.<br><b>Bills</b>: monthly bills, paid and unpaid, and money you are waiting for.<br><b>Insights</b>: where your money went.</p><p><b>☰</b> (top left of Home) has everything else: budgets, accounts, backup, settings. <b>🔥</b> (top right) is your streak.</p>`]
   ]],
   ['Everyday spending', [
     ['Add something I paid for myself', `<p><b>+</b> → type the amount → pick a category → <b>Save</b>. Nothing else is needed.</p><p class="ex">Example: Fuel Rs 4,500 from cash. Type 4500, tap <b>Fuel</b>, Paid from <b>Cash</b>, Save.</p>`],
-    ['I forgot to enter it yesterday', `<p>Tap the <b>Date</b> field (it shows Today) and pick the day.</p><p class="ex">Example: Saturday's grocery on Monday: tap Date and pick Saturday.</p>`],
     ['Several items in one entry', `<p>Type them with +: <b>1200+350+80</b>. The app adds them up and shows the total.</p>`],
-    ['Keep a receipt photo', `<p>On Home tap <b>Snap receipt</b> to take the photo now and fill the details later. Or in the form, <b>More details → Attach photo</b>.</p>`],
-    ['Something I enter often (fuel, milk)', `<p>Nothing to set up: after you enter it twice it appears on Home under <b>Add again</b>. To pin one there yourself, open <b>More details</b> and tick <b>Save as quick template</b>.</p>`],
+    ['Keep a receipt photo', `<p>On the Add screen tap <b>Snap receipt, fill later</b> to take the photo now and add the details later. Or open <b>More details → Attach photo</b> while adding. To send it to someone, open the entry → <b>Share receipt</b>.</p>`],
+    ['Something I enter often (fuel, milk)', `<p>Nothing to set up: after you enter it twice it appears on Home under <b>Add again</b>. Tap it, check the amount, Save. To keep one there always, open any such entry → <b>Pin to Home</b>. <b>Edit</b> next to Add again removes pins. <b>Copy for today</b> in any entry repeats it once.</p>`],
     ['Area: Home, Office, Car…', `<p>The Area line under the category fills itself from the category: Fuel goes where you usually put fuel (e.g. Car), Grocery goes to Home. It never copies the area of your last entry. With no history it stays <b>None</b>; change it in one tap.</p><p class="ex">Example: Fuel for the govt vehicle → Area <i>Govt vehicle</i>. Next time you tap Fuel, Govt vehicle is already filled.</p>`],
-    ['I saved something by mistake', `<p>Right after saving, tap <b>Undo</b> in the message at the bottom (5 seconds). Later: open the entry → <b>Edit</b> or <b>Delete</b>.</p>`],
-    ['Area, category, note: what is the difference?', `<p><b>Category</b> = what it was (Fuel, Grocery, Education).<br><b>Area</b> = which part of life (Home, Office, Car).<br><b>Note</b> = anything to remember (shop name, bill number).</p><p class="ex">Example: Ali's school fee → Category <i>Education</i>, Area <i>Home</i>, For <i>Ali</i>.</p>`]
+    ['I saved or deleted something by mistake', `<p>Right after saving, tap <b>Undo</b> in the message at the bottom. Later, open the entry → <b>Edit</b> or <b>Delete</b>. Deleted entries wait 30 days in <b>☰ → Recently deleted</b>: tap <b>Restore</b> to bring one back.</p>`]
   ]],
   ['Family, friends and loans', [
     ['I spent on a family member (not coming back)', `<p><b>+</b> → amount → tap <b>For someone else?</b> → pick the person → <b>Not coming back</b> → category → Save. Or open the person in People and tap <b>I gave / paid</b>.</p><p class="ex">Example: Ali's school fee Rs 6,500. It counts as your spending, and Insights → <b>Spent on people</b> shows how much went to Ali this month. Ali owes you nothing.</p>`],
@@ -2470,24 +2540,24 @@ const HELP = [
     ['Group costs of one job or site', `<p><b>☰ → Projects</b> → add one (e.g. "Canal bank repair"). Then pick it on the <b>Project</b> line under Area when adding entries (it shows once you have an open project, and always starts at None). The project page shows the total, your own share vs what will be repaid, what it went on, month by month, and cash still with your people. Add an <b>Estimate / budget</b> (Edit) to see how much of it is used. On the project page: <b>+ Spent</b>, <b>Gave to spend</b> (cash to someone for this project), <b>Got paid back</b>, and entries by month with filters. <b>Mark as finished</b> when done.</p>`]
   ]],
   ['Bills', [
-    ['Add a monthly bill', `<p><b>Bills → + Add bill</b> → pick the type (Electricity, Gas, Internet…) → amount → due date → <b>How often: Every month</b>.</p>`],
+    ['Add a monthly bill', `<p><b>Bills → + Add</b> → pick the type (Electricity, Gas, Internet…) → amount → due date → <b>How often: Every month</b>.</p>`],
+    ['Track a vehicle (fuel, km per litre)', `<p>Make a project for the vehicle (e.g. "Govt vehicle") and tick <b>This is a vehicle</b>. When you add fuel with that project, type the <b>litres</b> and the <b>odometer</b> reading. The project page then shows km per litre, cost per km, km driven and a fuel log. Repairs on the same project count in the cost per km.</p>`],
     ['My bill amount changes every month', `<p>Pay it once with the real amount. From then on the next bill is <b>estimated</b> (≈) from your history: the same month last year if known, else the average of the last 3. When the bill arrives, open it in <b>Bills</b> and tap <b>Enter bill amount</b>, or just type the real amount when you tap Pay.</p><p>Tap any bill to see every month: average, highest, lowest, last bill vs the one before, units and cost per unit, and whether you paid late.</p><p class="ex">Example: LESCO was Rs 21,500 in March and Rs 6,100 in July. Next March the estimate starts from last March.</p>`],
     ['Reference no. and transaction ID', `<p>Add the <b>Reference / consumer no.</b> from the printed bill once (edit the bill). When you pay, tap <b>Copy</b> and paste it in your bank app.</p><p>After paying, add the bank's <b>Transaction ID</b> and, for electricity, gas or water, the <b>units</b>. Search in All entries finds both.</p>`],
     ['Add a payment from a bank SMS', `<p>Long-press the bank or wallet SMS → <b>Share</b> → <b>Hisaab</b> (the app must be installed to the home screen). Or copy the SMS and tap <b>Paste bank SMS</b> on Home.</p><p>The amount, date, name, account and transaction ID fill in. Pick the account once for each A/C number; next time it is picked for you. If it matches a bill, the bill is marked paid. Sharing the same SMS twice will not add it twice.</p>`],
     ['I paid a bill from the + button', `<p>When a bill is due within a week, <b>Paying a bill?</b> appears in the form. Tap the bill: the amount fills in and the bill is marked paid. No double counting.</p>`],
-    ['Money I am waiting for (TA, arrears)', `<p><b>+ → Money in</b> → amount → tick <b>Not received yet</b> → Save. When it arrives, open it and tap <b>Receive</b>.</p>`]
+    ['Money I am waiting for (TA, arrears)', `<p><b>Bills → Money coming in → + Add</b>. Or <b>+ → Money in</b> → amount → <b>More details</b> → tick <b>Not received yet</b>. It is listed in Bills under <b>Money coming in</b>; when it arrives tap <b>Received</b>.</p>`]
   ]],
   ['Seeing where money went', [
     ['Spending for a week, month or custom dates', `<p>On Home tap the period name (<b>This month ▾</b>) → This week, Last week, Last month, a past month or Custom dates. Use ‹ › to step back and forward.</p>`],
-    ['Totals by area, category and person', `<p>Home shows the area totals under Spent. Tap <b>See full breakdown</b> (or the Insights tab) for the full picture.</p>`],
+    ['Export to Excel or PDF', `<p><b>☰ → All entries</b> → set the month and filters → <b>Export</b> → Excel file (.csv) or PDF. An account's statement has its own <b>Export</b> under the account name. In Insights, <b>Share summary on WhatsApp</b> sends the month in a few lines.</p>`],
     ['What Insights shows', `<p>Three tabs. Swipe months with ‹ ›.</p><p><b>Overview</b>: how much you spent, a line showing your pace through the month against last month, where the month will end, income and saved, budget, a ring of categories (tap one for its entries), areas with their change from last month, bills, biggest expenses and month by month.<br><b>Projects</b>: each project or site with what it cost, your own share vs what will be repaid, what is still to get back, and cash still with your people.<br><b>People</b>: who owes you, whom you owe, and what you spent on each person.</p><p class="ex">Tip: touch any chart to see the exact amount.</p>`],
-    ['Add again on Home', `<p>Things you enter often (fuel, milk, a weekly payment) appear on Home under <b>Add again</b> after you have entered them twice. Tap one: the form opens filled with the last amount. Change the amount if needed and Save.</p>`],
     ['Set a budget', `<p><b>☰ → Budgets</b> → <b>Set a monthly budget</b> for all spending, or <b>+ Budget for a category or area</b> (e.g. Fuel Rs 8,000). The line on each bar shows how far through the month you are: if the bar passes it, you are spending too fast.</p>`],
     ['What is the 🔥 streak?', `<p>Days in a row with something recorded. On a day with no spending tap <b>Nothing spent today</b>. Hollow dots are missed days: tap one to fill it in.</p>`]
   ]],
   ['Cash, bank and accounts', [
     ['Moving money between my accounts', `<p><b>+ → Transfer</b> → from → to → amount. Example: ATM withdrawal from Bank to Cash. It is not spending.</p>`],
-    ['My cash in the app does not match my wallet', `<p><b>☰ → Accounts</b> → <b>Check</b> on that account → type what you really have. The app records the difference as unrecorded spending or income, so totals stay true. Doing this once a week keeps every rupee accounted for.</p>`],
+    ['My cash or bank does not match', `<p><b>☰ → Accounts</b> → tap the account. Its statement shows every entry with the balance after it, month by month, so you can compare with your bank app. If it still differs, tap <b>Fix balance</b>, type what is really there, and one adjustment entry corrects it.</p>`],
     ['Old loans from before I used Hisaab', `<p>Add them as normal and, in Paid from / From account, choose <b>Old amount, from before I used Hisaab</b>. The person's balance updates without changing your cash.</p>`]
   ]],
   ['Keeping your data safe', [
@@ -2558,14 +2628,17 @@ async function openEntry(id) {
   if (e.accountId) dl(e.type === 'transfer' ? 'From' : 'Account', esc(acc(e.accountId)?.name || '—'));
   if (e.toAccountId) dl('To', esc(acc(e.toAccountId)?.name || '—'));
   if (e.viaPersonId) dl('Paid by', esc(person(e.viaPersonId)?.name || '—'));
-  if (e.personId) dl(e.type === 'recoverable' ? 'Recover from' : 'Person', esc(person(e.personId)?.name || '—'));
+  if (e.personId) dl(e.type === 'recoverable' ? 'Get back from' : 'Person', esc(person(e.personId)?.name || '—'));
   if (e.bookId) dl('Area', esc(book(e.bookId)?.name || '—'));
-  if (e.categoryId) dl('Category', esc(cat(e.categoryId)?.name || '—'));
+  if (e.categoryId) dl('Category', `${esc(cat(e.categoryId)?.name || '—')} <button class="link small" data-act="catEntries" data-c="${e.categoryId}">all ›</button>`);
   if (e.workId) dl('Project', esc(work(e.workId)?.name || '—'));
   if (e.dueDate) dl('Return by', fmtDate(e.dueDate));
   if (REPEAT_LBL[e.repeat]) dl('Repeats', REPEAT_LBL[e.repeat]);
-  if (e.note) dl('Note', esc(e.note));
+  if (e.note && e.note.trim().toLowerCase() !== entryTitle(e).trim().toLowerCase()) dl('Note', esc(e.note));
   const actions = [], minor = [];
+  if (!e.draft && ['expense', 'income', 'recoverable', 'transfer', 'lent', 'advance'].includes(e.type)) minor.push(`<button class="link" data-act="copyEntry" data-id="${e.id}">Copy for today</button>`);
+  if (!e.draft && e.type === 'expense') { const pinned = S.templates.some(t => t.name.toLowerCase() === entryTitle(e).toLowerCase()); minor.push(`<button class="link" data-act="pinEntry" data-id="${e.id}">${pinned ? 'Unpin' : 'Pin to Home'}</button>`); }
+  if (e.receipt && navigator.share) minor.push(`<button class="link" data-act="shareReceipt" data-id="${e.id}">Share receipt</button>`);
   let extra = '';
   if (e.type === 'recoverable' && !e.draft) {
     const ri = recInfo(e);
@@ -2623,9 +2696,10 @@ async function deleteEntry(id) {
     if (recs.length) { toast('Delete its recovery entries first'); return; }
   }
   const linked = e.type === 'expected' ? live().filter(x => x.linkExpected === id).length : 0;
-  const ok = await confirmBox('Delete entry', `Delete "${esc(entryTitle(e))}" of ${money(e.amount)}?${linked ? ' Linked payments will be kept.' : ''} This cannot be undone.`, 'Delete', true);
+  const ok = await confirmBox('Delete entry', `Delete "${esc(entryTitle(e))}" of ${money(e.amount)}?${linked ? ' Linked payments will be kept.' : ''} You can restore it from ☰ → Recently deleted for 30 days.`, 'Delete', true);
   if (!ok) return;
-  if (e.receipt) { await DB.del('img', e.receipt); delete imgCache[e.receipt]; }
+  const relink = linked ? S.entries.filter(x => x.linkExpected === id).map(x => x.id) : [];
+  S.trash = [{ ...e, deletedAt: new Date().toISOString(), relink }, ...(S.trash || [])].slice(0, 300);
   S.entries = S.entries.filter(x => x.id !== id);
   if (linked) S.entries.forEach(x => { if (x.linkExpected === id) delete x.linkExpected; });
   if (e.linkExpected) { const x = S.entries.find(y => y.id === e.linkExpected); if (x && x.closed && expectedInfo(x).rem > 0) x.closed = false; }
@@ -2633,6 +2707,27 @@ async function deleteEntry(id) {
   closeSheet();
   toast('Deleted');
   render();
+}
+
+VIEWS.trash = () => {
+  const T = S.trash || [];
+  if (!T.length) return '<div class="empty">Nothing here. Deleted entries stay here for 30 days, then they are removed for good.</div>';
+  return `<p class="muted small" style="margin:0 2px 10px">Kept for 30 days after you delete them.</p>
+  <div class="list">${T.map(e => { const left = Math.max(0, 30 - daysBetween(e.deletedAt.slice(0, 10), today()));
+    return `<div class="list-item">${entryIcon(e)}<div class="li-main"><div class="li-title">${esc(entryTitle(e))}</div><div class="li-sub">${fmtShort(e.date)} · ${typeLabel(e.type)} · ${left} day${left === 1 ? '' : 's'} left</div></div>
+      <div class="li-amt">${money(e.amount)}<div><button class="btn sm" data-act="restoreTrash" data-id="${e.id}">Restore</button></div></div></div>`; }).join('')}</div>
+  <button class="btn danger block mt" data-act="emptyTrash">Delete all forever</button>`;
+};
+async function restoreTrash(id) {
+  const x = (S.trash || []).find(t => t.id === id); if (!x) return;
+  if (S.entries.some(e => e.id === id)) { S.trash = S.trash.filter(t => t.id !== id); await save(); render(); return; }
+  const { deletedAt, relink, ...e } = x;
+  if (e.workId && !work(e.workId)) e.workId = ''; if (e.personId && !person(e.personId)) e.personId = '';
+  S.entries.push(e);
+  (relink || []).forEach(rid => { const p = S.entries.find(y => y.id === rid); if (p && !p.linkExpected) p.linkExpected = e.id; });
+  if (e.linkExpected) afterExpectedPayment(e.linkExpected);
+  S.trash = S.trash.filter(t => t.id !== id);
+  await save(); toast('Restored'); render();
 }
 
 // Recovery allocation
@@ -2832,6 +2927,7 @@ function openWorkEditor(id, fromForm) {
     <div class="field"><label>Name</label><input id="wName" value="${esc(w?.name || '')}" placeholder="e.g. Office repair, Wedding, Site name"></div>
     <div class="field"><label>Reference (optional)</label><input id="wRef" value="${esc(w?.ref || '')}" placeholder="Estimate or project no."></div>
     <div class="field"><label>Estimate / budget (optional)</label><input id="wBudget" inputmode="decimal" value="${w?.budget ? esc(String(w.budget)) : ''}" placeholder="Total you expect to spend"></div>
+    <label class="inline-check"><input type="checkbox" class="check" id="wVehicle" ${w?.vehicle ? 'checked' : ''}> This is a vehicle (fuel log: litres, km, km per litre)</label>
     ${w ? `<label class="inline-check"><input type="checkbox" class="check" id="wClosed" ${w.closed ? 'checked' : ''}> Finished (hide from the Add screen)</label>` : ''}
     <div class="btn-row">${w ? `<button class="btn danger" data-act="deleteWork" data-id="${w.id}">Delete</button>` : ''}<button class="btn primary" data-act="saveWork" data-id="${w?.id || ''}">Save</button></div>`);
   setTimeout(() => $('#wName')?.focus(), 50);
@@ -2839,7 +2935,7 @@ function openWorkEditor(id, fromForm) {
 async function saveWork(id) {
   const name = $('#wName').value.trim();
   if (!name) { toast('Enter a name'); return; }
-  const bud = evalAmount($('#wBudget')?.value || ''); const data = { name, ref: $('#wRef').value.trim(), budget: bud > 0 ? bud : 0 };
+  const bud = evalAmount($('#wBudget')?.value || ''); const data = { name, ref: $('#wRef').value.trim(), budget: bud > 0 ? bud : 0, vehicle: !!$('#wVehicle')?.checked };
   if ($('#wClosed')) data.closed = $('#wClosed').checked;
   let wid = id;
   if (id) Object.assign(work(id), data);
@@ -2932,14 +3028,66 @@ function printPerson(pid) {
 function workText(wid) {
   const w = work(wid); const st = workStats(wid);
   const lines = [...st.entries].sort((a, b) => (a.date < b.date ? -1 : 1)).slice(-20).map(e => `${fmtShort(e.date)} · ${typeLabel(e.type)} · ${entryTitle(e)} · ${money(e.amount)}`);
-  return `Project: ${w.name}${w.ref ? ' (' + w.ref + ')' : ''}\nAs of ${fmtDate(today())}\nTotal spent: ${money(st.total)}\nRecoverable: ${money(st.rec)} (pending ${money(st.recPending)})\nAdvances given: ${money(st.adv)}\n\n${lines.join('\n')}`;
+  return `Project: ${w.name}${w.ref ? ' (' + w.ref + ')' : ''}\nAs of ${fmtDate(today())}\nTotal spent: ${money(st.total)}\nTo be repaid: ${money(st.rec)} (still to get back ${money(st.recPending)})\nAdvances given: ${money(st.adv)}\n\n${lines.join('\n')}`;
 }
 function printWork(wid) {
   const w = work(wid); const st = workStats(wid); const am = allocMap();
   printHTML(`Project report: ${w.name}`, `${w.ref ? 'Ref: ' + esc(w.ref) + ' · ' : ''}as of ${fmtDate(today())}`,
     [{ t: 'Date' }, { t: 'Type' }, { t: 'Detail' }, { t: 'Status' }, { t: 'Amount', n: 1 }],
     [...st.entries].sort((a, b) => (a.date < b.date ? -1 : 1)).map(e => [fmtDate(e.date), esc(typeLabel(e.type)), esc(entryTitle(e)) + (person(e.viaPersonId) ? ' (paid by ' + esc(person(e.viaPersonId).name) + ')' : ''), e.type === 'recoverable' ? recInfo(e, am).status : '', money(e.amount)]),
-    `Total spent ${money(st.total)} · Recoverable ${money(st.rec)} · Pending ${money(st.recPending)} · Advances ${money(st.adv)}`);
+    `Total spent ${money(st.total)} · To be repaid ${money(st.rec)} · Still to get back ${money(st.recPending)} · Given to spend ${money(st.adv)}`);
+}
+
+function monthSummaryText(ym) {
+  const [f, to] = monthBounds(ym), sp = spendMonth(ym), inc = incomeIn(f, to), prev = spendMonth(shiftYm(ym, -1));
+  const top = Object.entries(sp.byCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const areas = Object.entries(sp.byBook).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const ch = prev.total ? Math.round((sp.total - prev.total) / prev.total * 100) : null;
+  const lines = [`*Hisaab · ${monthLabel(ym)}*`, `Spent: ${money(sp.total)}${ch === null ? '' : ` (${ch >= 0 ? '+' : ''}${ch}% vs ${monthLabel(shiftYm(ym, -1)).split(' ')[0]})`}`];
+  if (inc) lines.push(`Income: ${money(inc)}`, `Saved: ${money(r2(inc - sp.total))}`);
+  if (top.length) lines.push('', '*Top categories*', ...top.map(([id, v]) => `• ${catName(id)}: ${money(v)}`));
+  if (areas.length > 1) lines.push('', '*By area*', ...areas.map(([id, v]) => `• ${bookName(id)}: ${money(v)}`));
+  return lines.join('\n');
+}
+
+// ---------------- Export (Excel CSV / PDF) ----------------
+function exportRows(opts) {
+  if (opts.acc) {
+    const id = opts.acc, ym = ui.accMonth || today().slice(0, 7), [f, to] = monthBounds(ym);
+    const rows = live().filter(e => accEffect(e, id) !== 0 && e.date >= f && e.date <= to).sort((x, y) => (x.date < y.date ? -1 : 1));
+    return { label: `${acc(id)?.name || 'Account'} · ${monthLabel(ym)}`, file: `hisaab-${(acc(id)?.name || 'account').toLowerCase().replace(/\W+/g, '-')}-${ym}`, list: rows, sign: e => accEffect(e, id) };
+  }
+  const F = ui.entryFilter || { month: today().slice(0, 7) };
+  const list = filteredEntries(F).slice().reverse();
+  const lbl = F.month ? monthLabel(F.month) : F.from ? (F.rangeLabel || F.from + ' – ' + F.to) : 'All dates';
+  return { label: `Entries · ${lbl}`, file: `hisaab-${F.month || (F.from ? F.from + '_' + F.to : 'all')}`, list, sign: e => { const fl = entryFlow(e); return fl === 'in' ? e.amount : fl === 'out' ? -e.amount : 0; } };
+}
+function exportSheet(opts = {}) {
+  ui.exportOpts = opts;
+  const r = exportRows(opts);
+  openSheet(`${sheetHead('Export')}<p class="muted small" style="margin-bottom:12px">${esc(r.label)} · ${r.list.length} entr${r.list.length === 1 ? 'y' : 'ies'}</p>
+    <button class="btn primary block" data-act="exportCsv">Excel file (.csv)</button>
+    <button class="btn block mt" data-act="exportPdf">PDF / print</button>
+    <p class="muted small mt">The Excel file opens in Excel, Google Sheets or WPS. For PDF, choose “Save as PDF” in the print screen.</p>`);
+}
+async function exportCsv() {
+  const r = exportRows(ui.exportOpts || {});
+  const q = v => { const t = String(v ?? ''); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const head = ['Date', 'Type', 'Detail', 'Category', 'Area', 'Project', 'Person', 'Account', 'Out', 'In', 'Note', 'Transaction ID'];
+  const lines = [head.join(',')].concat(r.list.map(e => { const v = r.sign(e); return [e.date, typeLabel(e.type), entryTitle(e), e.categoryId ? catName(e.categoryId) : '', e.bookId ? bookName(e.bookId) : '', work(e.workId)?.name || '', person(e.personId || e.viaPersonId || e.spentOn)?.name || '', acc(e.accountId)?.name || '', v < 0 ? -v : '', v > 0 ? v : '', e.note || '', e.txId || ''].map(q).join(','); }));
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), name = r.file + '.csv';
+  let shared = false;
+  try { const file = new File([blob], name, { type: 'text/csv' }); if (navigator.canShare && navigator.canShare({ files: [file] }) && /Android|iPhone|iPad/i.test(navigator.userAgent)) { await navigator.share({ files: [file], title: name }); shared = true; } } catch (e) { if (e && e.name === 'AbortError') return; }
+  if (!shared) { const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000); }
+  closeSheet(); toast('Exported ' + name);
+}
+function exportPdf() {
+  const r = exportRows(ui.exportOpts || {});
+  let o = 0, i = 0; r.list.forEach(e => { const v = r.sign(e); if (v < 0) o = r2(o - v); else i = r2(i + v); });
+  closeSheet();
+  printHTML(r.label, `as of ${fmtDate(today())}`, [{ t: 'Date' }, { t: 'Detail' }, { t: 'Type' }, { t: 'Out', n: 1 }, { t: 'In', n: 1 }],
+    r.list.map(e => { const v = r.sign(e); return [fmtDate(e.date), esc(entryTitle(e)) + (e.txId ? ' <small>(' + esc(e.txId) + ')</small>' : ''), esc(typeLabel(e.type)), v < 0 ? money(-v) : '', v > 0 ? money(v) : '']; }),
+    `Out ${money(o)} · In ${money(i)} · ${r.list.length} entries`);
 }
 
 // ---------------- Backup ----------------
@@ -3188,8 +3336,8 @@ const ACT = {
   go: el => go(el.dataset.v, el.dataset.p || null),
   back: () => { if (stack.length) history.back(); else back(); },
   goPending: el => {
-    if (el.dataset.seg === 'rec' || el.dataset.seg === 'income') { ui.pendingSeg = 'rec'; go('pending'); }
-    else { const outOverdue = live().some(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date < today()); if (outOverdue) { ui.billFilter = 'unpaid'; jump('bills'); } else { ui.pendingSeg = 'exp'; go('pending'); } }
+    if (el.dataset.seg === 'rec') { ui.peopleF = 'owed'; ui.peopleQ = ''; jump('people'); }
+    else { ui.billFilter = 'unpaid'; jump('bills'); }
   },
   peopleSeg: el => { ui.peopleSeg = el.dataset.seg; render(); },
   billFilt: el => { ui.billFilter = el.dataset.v; render(); },
@@ -3257,6 +3405,40 @@ const ACT = {
     go('entries');
   },
   clearEF: () => { ui.entryFilter = null; render(); },
+  shareMonth: el => openWhatsApp('', monthSummaryText(el.dataset.ym)),
+  copyEntry: el => {
+    const e = S.entries.find(x => x.id === el.dataset.id); if (!e) return;
+    closeSheet();
+    openFormWith({ type: e.type, amount: String(e.amount), date: today(), note: e.note || '', categoryId: e.categoryId || '', bookId: e.bookId || '', workId: e.workId || '',
+      paidFrom: e.viaPersonId ? 'p:' + e.viaPersonId : e.accountId ? 'a:' + e.accountId : '', accountId: e.accountId || '', toAccountId: e.toAccountId || '',
+      personId: e.type === 'recoverable' ? '' : (e.personId || ''), recoverFrom: e.type === 'recoverable' ? (e.personId || '') : e.type === 'expense' ? (e.spentOn || '') : '' });
+    toast('Copied. Check the amount and Save.');
+  },
+  shareReceipt: async el => {
+    const e = S.entries.find(x => x.id === el.dataset.id); if (!e || !e.receipt) return;
+    try { const d = await loadImg(e.receipt); const blob = d instanceof Blob ? d : await (await fetch(d)).blob(); const f = new File([blob], `receipt-${e.date}.jpg`, { type: blob.type || 'image/jpeg' }); await navigator.share({ files: [f], title: entryTitle(e) }); } catch (err) { if (!err || err.name !== 'AbortError') toast('Could not share the photo'); }
+  },
+  exportEntries: () => exportSheet({}),
+  exportCsv: () => exportCsv(),
+  exportPdf: () => exportPdf(),
+  restoreTrash: el => restoreTrash(el.dataset.id),
+  emptyTrash: async () => {
+    if (!(await confirmBox('Delete forever', `Remove ${S.trash.length} deleted entr${S.trash.length === 1 ? 'y' : 'ies'} for good? This cannot be undone.`, 'Delete forever', true))) return;
+    for (const x of S.trash) if (x.receipt) { try { await DB.del('img', x.receipt); delete imgCache[x.receipt]; } catch (e) { /* ignore */ } }
+    S.trash = []; await save(); toast('Emptied'); render();
+  },
+  accMonth: el => { if (el.disabled) return; ui.accMonth = shiftYm(ui.accMonth || today().slice(0, 7), Number(el.dataset.n)); if (ui.accMonth > today().slice(0, 7)) ui.accMonth = today().slice(0, 7); render(); },
+  exportAcc: el => exportSheet({ acc: el.dataset.id }),
+  openUnassigned: () => { ui.recFilter = 'open'; ui.recPerson = '_none'; go('pending'); },
+  pinEdit: () => { ui.pinEdit = !ui.pinEdit; render(); },
+  unpin: async el => { S.templates = S.templates.filter(t => t.id !== el.dataset.id); if (!S.templates.length) ui.pinEdit = false; await save(); render(); },
+  pinEntry: async el => {
+    const e = S.entries.find(x => x.id === el.dataset.id); if (!e) return;
+    const name = entryTitle(e), have = S.templates.find(t => t.name.toLowerCase() === name.toLowerCase());
+    if (have) { S.templates = S.templates.filter(t => t !== have); await save(); closeSheet(); toast('Removed from Add again'); render(); return; }
+    S.templates.push({ id: uid(), name, data: { type: e.type, amount: String(e.amount), paidFrom: e.viaPersonId ? 'p:' + e.viaPersonId : e.accountId ? 'a:' + e.accountId : '', accountId: e.accountId || '', bookId: e.bookId || '', categoryId: e.categoryId || '', workId: e.workId || '', note: e.note || '' } });
+    await save(); closeSheet(); toast('Pinned to Add again on Home'); render();
+  },
   allCats: () => { ui.allCats = !ui.allCats; render(); },
   catEntries: el => { ui.entryFilter = { month: today().slice(0, 7), type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false, cat: el.dataset.c }; go('entries'); },
   pasteSms: () => pasteSms(),
