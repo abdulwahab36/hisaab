@@ -922,3 +922,14 @@ body.roottab:not(.nohead) main { padding-top: 46px; }
 .veh-row b { text-align: right; }
 .quickin { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
 .quickin .chip { font-size: 13px; }
+.agegrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.agegrid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.agegrid span { font-size: 11.5px; color: var(--muted); }
+.agegrid b { font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.agegrid .w b { color: var(--warn); }
+.agegrid .d b { color: var(--danger); }
+.pj-facts { padding: 4px 16px; margin-bottom: 12px; }
+.pj-facts .kv { display: flex; justify-content: space-between; align-items: center; min-height: 44px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.pj-facts .kv:last-child { border-bottom: 0; }
+.pj-facts .kv span { color: var(--muted); }
+.pj-more { margin: 4px 0 8px; }

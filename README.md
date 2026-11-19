@@ -87,6 +87,12 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - Vehicle projects: tick "This is a vehicle" on a project, type litres and odometer with fuel; the project shows km per litre, cost per km, km driven and a fuel log.
 - Budgets: how much a day keeps you inside the budget.
 
+## v39
+- Insights has no progress bars: projects and people are plain rows (name, amount, ›).
+- Projects (☰ and Insights): each row is the name, one fact only when it matters ("Rs 25,000 to get back"), the amount and ›.
+- Project page: name with Edit · Share · PDF, total, a short list of what needs doing (still to get back, cash with people, estimate left), + Spent / Gave to spend / Got paid back, then entries by month. Charts, the own-vs-repaid split and the vehicle fuel log are one tap away under Breakdown.
+- People → Owe me: "How old" is four numbers, no bars.
+
 ## Help inside the app
 ☰ > How to use Hisaab: every task explained in plain steps with examples, with a search box.
 

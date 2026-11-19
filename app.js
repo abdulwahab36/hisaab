@@ -568,7 +568,7 @@ window.addEventListener('popstate', () => {
 const TITLES = {
   welcome: 'Hisaab',
   home: 'Hisaab', people: 'People', add: 'Add entry', pending: 'To get back', more: 'More',
-  person: 'Person', accounts: 'Accounts', books: 'Areas', cats: 'Categories', works: 'Projects', work: 'Project', trash: 'Recently deleted', account: 'Account',
+  person: 'Person', accounts: 'Accounts', books: 'Areas', cats: 'Categories', works: 'Projects', work: 'Project', workmore: 'Breakdown', trash: 'Recently deleted', account: 'Account',
   templates: 'Quick templates', prefs: 'Preferences', budgets: 'Budgets', bills: 'Bills', insights: 'Insights', entries: 'All entries', backup: 'Backup & restore', security: 'App lock', help: 'How to use Hisaab'
 };
 
@@ -609,7 +609,7 @@ function render() {
   saveNav();
 }
 // Remember where you are, so pulling down to refresh keeps you on the same screen.
-const NAV_KEEP = ['account', 'trash', 'home', 'people', 'bills', 'insights', 'entries', 'person', 'work', 'works', 'bill', 'budgets', 'accounts', 'books', 'cats', 'prefs', 'backup', 'help', 'pending', 'templates', 'security'];
+const NAV_KEEP = ['workmore', 'account', 'trash', 'home', 'people', 'bills', 'insights', 'entries', 'person', 'work', 'works', 'bill', 'budgets', 'accounts', 'books', 'cats', 'prefs', 'backup', 'help', 'pending', 'templates', 'security'];
 function saveNav() {
   try {
     if (!S.settings.onboarded || !NAV_KEEP.includes(cur.v)) { sessionStorage.removeItem('hisaab_nav'); return; }
@@ -621,7 +621,7 @@ function restoreNav() {
     const n = JSON.parse(sessionStorage.getItem('hisaab_nav') || 'null');
     if (!n || !S.settings.onboarded || !NAV_KEEP.includes(n.v) || Date.now() - n.t > 12 * 3600e3) return;
     if (n.v === 'person' && !person(n.p)) return;
-    if (n.v === 'work' && !work(n.p)) return;
+    if ((n.v === 'work' || n.v === 'workmore') && !work(n.p)) return;
     if (n.v === 'bill' && !billSeries(n.p).length) return;
     tab = ['home', 'people', 'bills', 'insights'].includes(n.tab) ? n.tab : 'home';
     insMonth = n.insMonth || null; if (n.insTab) ui.insTab = n.insTab;
@@ -806,9 +806,7 @@ function ageBarsHtml() {
     bk.v = r2(bk.v + rem);
   }
   if (!buckets.some(b => b.v > 0)) return '';
-  const maxA = Math.max(1, ...buckets.map(b => b.v));
-  return `<div class="card">${buckets.map(b => `<div class="bar-row"><div class="bar-top"><span>${b.label}</span><b>${money(b.v)}</b></div><div class="bar ${b.cls}"><i style="width:${(b.v / maxA) * 100}%"></i></div></div>`).join('')}</div>`;
-}
+  return `<div class="agegrid">${buckets.map(b => `<div class="${b.v ? b.cls : ''}"><span>${b.label}</span><b>${money(b.v)}</b></div>`).join('')}</div>`;}
 
 function dueTag(p, bal) {
   if (!p.dueDate || !bal) return '';
@@ -836,7 +834,7 @@ function peopleList() {
   return `
   <div class="chips" style="margin-bottom:8px">${[['all', 'All', S.people.length], ['owed', 'Owe me', nOwed], ['owe', 'I owe', nOwe]].map(([k, l, n]) => `<button class="chip ${pf === k ? 'on' : ''}" data-act="peopleF" data-v="${k}">${l} (${n})</button>`).join('')}</div>
   ${pf === 'owed' ? (() => { const am = allocMap(), un = live().filter(e => e.type === 'recoverable' && !e.personId && recInfo(e, am).remaining > 0), unT = r2(un.reduce((a, e) => a + recInfo(e, am).remaining, 0));
-    return `<div class="card owe-age"><div class="iv-h" style="margin:0 0 6px">How old <span>follow up the oldest first</span></div>${ageBarsHtml()}</div>${un.length ? `<button class="list-item card" data-act="openUnassigned"><div class="li-main"><div class="li-title">Not linked to a person</div><div class="li-sub">${un.length} item${un.length > 1 ? 's' : ''} you will get back</div></div><div class="li-amt in">${money(unT)}</div><span class="chev">›</span></button>` : ''}`; })() : ''}
+    return `<div class="card owe-age"><div class="iv-h" style="margin:0 0 8px">How old <span>follow up the oldest first</span></div>${ageBarsHtml() || '<div class="muted small">Nothing waiting.</div>'}</div>${un.length ? `<button class="list-item card" data-act="openUnassigned"><div class="li-main"><div class="li-title">Not linked to a person</div><div class="li-sub">${un.length} item${un.length > 1 ? 's' : ''} you will get back</div></div><div class="li-amt in">${money(unT)}</div><span class="chev">›</span></button>` : ''}`; })() : ''}
   <div class="psum">${pf === 'owed' ? `${nOwed} ${nOwed === 1 ? 'person owes' : 'people owe'} you <b class="in">${money(owed)}</b>` : pf === 'owe' ? `You owe ${nOwe} ${nOwe === 1 ? 'person' : 'people'} <b class="${owe ? 'out' : ''}">${money(owe)}</b>` : `Owed to you <b class="in">${money(owed)}</b> · You owe <b class="${owe ? 'out' : ''}">${money(owe)}</b>`}</div>
   <div class="row" style="margin-bottom:10px">
     <input class="inp grow" placeholder="Search people" value="${esc(ui.peopleQ)}" data-ui="peopleQ">
@@ -1489,7 +1487,7 @@ function openMenu() {
   const here = v => (cur.v === v ? ' on' : '');
   const it = (v, icon, label, meta, act) => `<button class="dr-item${here(v)}" ${act || `data-act="go" data-v="${v}"`}>${svgIcon(icon)}<span class="dr-l">${label}</span>${meta !== '' && meta != null ? `<span class="dr-m">${meta}</span>` : ''}</button>`;
   $('#menuPanel').innerHTML = `<div class="dr-head">
-      <div class="dr-brand"><img src="icon.svg?v=38" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
+      <div class="dr-brand"><img src="icon.svg?v=39" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
       <button class="dr-acct ${bad || off ? 'warn' : ''}" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span>${bad || off ? '<span class="dr-dot"></span>' : ''}</button>
     </div>
     <nav class="dr-nav" aria-label="Menu">
@@ -1509,7 +1507,7 @@ function openMenu() {
       ${it('prefs', 'gear', 'Preferences', '')}
       ${it('help', 'help', 'How to use', '')}
     </nav>
-    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v38</p>`;
+    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v39</p>`;
   $('#menu').hidden = false; menuOpen = true; pushHist();
   requestAnimationFrame(() => $('#menu').classList.add('open'));
 }
@@ -1704,10 +1702,7 @@ VIEWS.works = () => {
     <input class="inp grow" placeholder="Search projects" value="${esc(ui.projQ || '')}" data-ui="projQ">
     <button class="btn primary" data-act="editWork">+ Project</button>
   </div>
-  <div class="list">${list.length ? list.map(({ w, st }) => `<button class="list-item" data-act="go" data-v="work" data-p="${w.id}">
-      <span class="ico av" aria-hidden="true">${esc((w.name.trim()[0] || '?').toUpperCase())}</span>
-      <div class="li-main"><div class="li-title">${esc(w.name)}</div></div>
-      <div class="li-amt">${money(st.total)}</div><span class="chev" aria-hidden="true">›</span></button>`).join('')
+  <div class="list">${list.length ? list.map(projRow).join('')
     : `<div class="empty">${q ? 'No match.' : pf === 'done' ? 'No finished projects.' : 'No projects yet. Tap + Project to group the costs of one job, site or event.'}</div>`}</div>`;
 };
 
@@ -1732,14 +1727,42 @@ function vehicleHtml(st) {
     ${log.length ? `<div class="veh-log">${log.map(({ e, dkm }) => `<button class="veh-row" data-act="openEntry" data-id="${e.id}"><span>${fmtShort(e.date)}</span><span>${e.litres} L</span><span>${e.odo ? e.odo.toLocaleString('en-PK') + ' km' : '—'}</span><span>${dkm > 0 ? (dkm / e.litres).toFixed(1) + ' km/L' : ''}</span><b>${money(e.amount)}</b></button>`).join('')}</div>` : ''}
   </section>`;
 }
+// Project page: name, total, what needs doing, entries. Charts live one tap away (Breakdown).
 VIEWS.work = (wid) => {
+  const w = work(wid);
+  if (!w) return '<div class="empty">Not found.</div>';
+  const st = workStats(wid), withPeople = Math.max(0, r2(st.adv - st.viaStaff)), budget = Number(w.budget) || 0;
+  const facts = [st.recPending ? `<div class="kv"><span>Still to get back</span><b class="in">${money(st.recPending)}</b></div>` : '',
+    withPeople ? `<div class="kv"><span>Cash still with your people</span><b class="warn">${money(withPeople)}</b></div>` : '',
+    budget ? `<div class="kv"><span>Estimate ${money(budget)}</span><b class="${st.total > budget ? 'out' : ''}">${st.total > budget ? money(r2(st.total - budget)) + ' over' : money(r2(budget - st.total)) + ' left'}</b></div>` : ''].filter(Boolean).join('');
+  const ents = [...st.entries].sort(sortDesc);
+  let lastM = '', hist = '';
+  for (const e of ents) { const m = e.date.slice(0, 7); if (m !== lastM) { hist += `<div class="pj-month">${monthLabel(m)}</div>`; lastM = m; } hist += entryItem(e); }
+  const openRec = live().some(e => e.type === 'recoverable' && e.workId === wid && recInfo(e).remaining > 0);
+  return `<div class="phero">
+    <span class="ico av lg" aria-hidden="true">${esc((w.name.trim()[0] || '?').toUpperCase())}</span>
+    <div class="grow"><h2>${esc(w.name)}</h2>
+      <div class="muted small">${[w.ref ? 'Ref ' + esc(w.ref) : '', w.closed ? 'Finished' : '', w.vehicle ? 'Vehicle' : ''].filter(Boolean).join(' · ')}</div>
+      <div class="hlinks"><button class="link" data-act="editWork" data-id="${wid}">Edit</button><span>·</span><button class="link" data-act="shareWork" data-p="${wid}">Share</button><span>·</span><button class="link" data-act="printWork" data-p="${wid}">PDF</button></div></div>
+  </div>
+  <div class="pbal"><span class="lbl">Spent on this project</span><b>${money(st.total)}</b></div>
+  ${facts ? `<div class="card pj-facts">${facts}</div>` : ''}
+  <div class="pills pfit">
+    <button class="pill primary" data-act="addToWork" data-p="${wid}">+ Spent</button>
+    <button class="pill" data-act="giveForWork" data-p="${wid}">Gave to spend</button>
+    ${openRec ? `<button class="pill" data-act="recoverWork" data-p="${wid}">Got paid back</button>` : ''}
+  </div>
+  ${st.entries.length ? `<button class="list-item card pj-more" data-act="go" data-v="workmore" data-p="${wid}"><div class="li-main"><div class="li-title">${w.vehicle ? 'Breakdown and fuel log' : 'Breakdown'}</div><div class="li-sub">${w.vehicle ? 'km per litre, cost per km, ' : ''}what it went on, month by month</div></div><span class="chev">›</span></button>` : ''}
+  <div class="list">${hist || '<div class="empty">Nothing linked yet. Tap “+ Spent”, or pick this project on the Add screen.</div>'}</div>
+  <div class="linkrow minor mt"><button class="link" data-act="toggleWorkDone" data-p="${wid}">${w.closed ? 'Reopen project' : 'Mark as finished'}</button></div>`;
+};
+VIEWS.workmore = (wid) => {
   const w = work(wid);
   if (!w) return '<div class="empty">Not found.</div>';
   const st = workStats(wid), ym = today().slice(0, 7), [f, to] = monthBounds(ym);
   const withPeople = Math.max(0, r2(st.adv - st.viaStaff));
-  const ownPct = st.total ? st.own / st.total * 100 : 0;
   const month = r2(st.entries.filter(e => (e.type === 'expense' || e.type === 'recoverable') && e.date >= f && e.date <= to).reduce((a, e) => a + e.amount, 0));
-  const budget = Number(w.budget) || 0, used = budget ? st.total / budget : 0;
+  const kv = (k, v, cls = '') => `<div class="kv"><span>${k}</span><b class="${cls}">${v}</b></div>`;
   const byCat = {};
   for (const e of st.entries) if (e.type === 'expense' || e.type === 'recoverable') byCat[e.categoryId || '_none'] = r2((byCat[e.categoryId || '_none'] || 0) + e.amount);
   const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
@@ -1748,44 +1771,18 @@ VIEWS.work = (wid) => {
   if (restV) slices.push({ id: '_rest', v: restV, name: rest.length + ' more', color: 'var(--c-other)' });
   const byM = {}; for (const e of st.entries) if (e.type === 'expense' || e.type === 'recoverable') byM[e.date.slice(0, 7)] = r2((byM[e.date.slice(0, 7)] || 0) + e.amount);
   const ms = Object.keys(byM).sort(), months = ms.length ? (() => { const out = []; for (let m = ms[0]; m <= ms[ms.length - 1]; m = shiftYm(m, 1)) out.push({ m, v: byM[m] || 0 }); return out.slice(-12); })() : [];
-  const pjf = ui.pjF || 'all';
-  const FIL = { all: () => true, own: e => e.type === 'expense', rec: e => e.type === 'recoverable', given: e => ['advance', 'lent', 'received', 'recovery'].includes(e.type) };
-  const ents = [...st.entries].filter(FIL[pjf] || FIL.all).sort(sortDesc);
-  const counts = Object.fromEntries(Object.keys(FIL).map(k => [k, st.entries.filter(FIL[k]).length]));
-  let lastM = '', hist = '';
-  for (const e of ents) { const m = e.date.slice(0, 7); if (m !== lastM) { hist += `<div class="pj-month">${monthLabel(m)}</div>`; lastM = m; } hist += entryItem(e); }
-  const openRecIds = live().filter(e => e.type === 'recoverable' && e.workId === wid && recInfo(e).remaining > 0).map(e => e.id);
   return `<div class="iv-body">
-  <div class="phero">
-    <span class="ico av lg" aria-hidden="true">${esc((w.name.trim()[0] || '?').toUpperCase())}</span>
-    <div class="grow"><h2>${esc(w.name)}</h2>
-      <div class="muted small">${[w.ref ? 'Ref ' + esc(w.ref) : '', w.closed ? 'Finished' : 'Open'].filter(Boolean).join(' · ')}</div>
-      <div class="hlinks"><button class="link" data-act="editWork" data-id="${wid}">Edit</button><span>·</span><button class="link" data-act="shareWork" data-p="${wid}">Share</button><span>·</span><button class="link" data-act="printWork" data-p="${wid}">PDF</button></div></div>
-  </div>
-  <div class="pbal"><span class="lbl">Spent on this project</span><b>${money(st.total)}</b></div>
-  ${budget ? `<div class="pj-budget ${used > 1 ? 'over' : used > .9 ? 'near' : ''}"><div class="bar"><i style="width:${Math.min(100, used * 100)}%"></i></div>
-    <div class="pj-bsub"><span>${Math.round(used * 100)}% of estimate ${money(budget)}</span><b>${used > 1 ? money(r2(st.total - budget)) + ' over' : money(r2(budget - st.total)) + ' left'}</b></div></div>` : ''}
-  <div class="pills pfit">
-    <button class="pill primary" data-act="addToWork" data-p="${wid}">+ Spent</button>
-    <button class="pill" data-act="giveForWork" data-p="${wid}">Gave to spend</button>
-    ${openRecIds.length ? `<button class="pill" data-act="recoverWork" data-p="${wid}">Got paid back</button>` : ''}
-  </div>
-  <div class="iv-stats pj-stats">
-    <div><span>${monthLabel(ym).split(' ')[0]}</span><b>${money(month)}</b></div>
-    <div><span>Still to get back</span><b class="${st.recPending ? 'in' : ''}">${money(st.recPending)}</b></div>
-    <div><span>Cash with people</span><b class="${withPeople ? 'warn' : ''}">${money(withPeople)}</b></div>
-  </div>
-  ${st.own && st.rec ? `<div class="pj-split"><div class="iv-split"><i class="own" style="width:${ownPct}%"></i><i class="rec" style="width:${100 - ownPct}%"></i></div>
-    <div class="iv-legend"><span><i class="k-own"></i>My own ${money(st.own)}</span><span><i class="k-rec"></i>To be repaid ${money(st.rec)}</span></div></div>` : ''}
-  ${withPeople ? `<p class="iv-pace">Cash still with your people: <b>${money(withPeople)}</b>. Ask them for bills or the change.</p>` : ''}
-  ${w.vehicle ? vehicleHtml(st) : ''}
-  ${cats.length ? `<section class="iv-card"><div class="iv-h">What it went on</div>${cats.length > 1 ? `<div class="iv-donut-wrap">${ivDonut(slices, st.total)}</div>` : ''}
-    <div class="iv-list">${slices.map(sl => `<div class="iv-row"><i class="iv-sw" style="background:${sl.color}"></i><span class="grow"><span class="iv-rn">${esc(sl.name)}</span></span><span class="iv-rv"><b>${money(sl.v)}</b><span>${Math.round(sl.v / st.total * 100)}%</span></span></div>`).join('')}</div></section>` : ''}
-  ${months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, months[months.length - 1].m)}</section>` : ''}
-  <div class="sec-title">Entries</div>
-  ${st.entries.length ? `<div class="chips pj-chips">${[['all', 'All'], ['own', 'My own'], ['rec', 'To be repaid'], ['given', 'Given / back']].filter(([k]) => k === 'all' || counts[k]).map(([k, l]) => `<button class="chip ${pjf === k ? 'on' : ''}" data-act="pjF" data-v="${k}">${l} (${counts[k]})</button>`).join('')}</div>` : ''}
-  <div class="list">${hist || '<div class="empty">Nothing linked yet. Tap “+ Spent”, or pick this project on the Add screen.</div>'}</div>
-  <div class="linkrow minor mt"><button class="link" data-act="toggleWorkDone" data-p="${wid}">${w.closed ? 'Reopen project' : 'Mark as finished'}</button></div>
+    <div class="card pj-facts">
+      ${kv('Spent in total', money(st.total))}
+      ${kv(monthLabel(ym).split(' ')[0], money(month))}
+      ${st.rec ? kv('My own money', money(st.own)) + kv('To be repaid to me', money(st.rec)) + kv('Still to get back', money(st.recPending), st.recPending ? 'in' : '') : ''}
+      ${st.adv ? kv('Given to people to spend', money(st.adv)) + kv('Cash still with them', money(withPeople), withPeople ? 'warn' : '') : ''}
+      ${Number(w.budget) ? kv('Estimate', `${money(w.budget)} · ${Math.round(st.total / w.budget * 100)}% used`, st.total > w.budget ? 'out' : '') : ''}
+    </div>
+    ${w.vehicle ? vehicleHtml(st) : ''}
+    ${cats.length ? `<section class="iv-card"><div class="iv-h">What it went on</div>${cats.length > 1 ? `<div class="iv-donut-wrap">${ivDonut(slices, st.total)}</div>` : ''}
+      <div class="iv-list">${slices.map(sl => `<div class="iv-row"><i class="iv-sw" style="background:${sl.color}"></i><span class="grow"><span class="iv-rn">${esc(sl.name)}</span></span><span class="iv-rv"><b>${money(sl.v)}</b><span>${Math.round(sl.v / st.total * 100)}%</span></span></div>`).join('')}</div></section>` : ''}
+    ${months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, months[months.length - 1].m)}</section>` : ''}
   </div>`;
 };
 
@@ -2277,44 +2274,20 @@ function ivOverview(ym) {
 }
 
 function ivProjects(ym) {
-  const [f, to] = monthBounds(ym);
-  if (!S.works.length) return `<div class="iv-empty"><b>Track a project, site or event</b><p>Group everything for one job, such as a building repair, a wedding or a site, and see what it cost, what the office still owes you and how much cash is still with your people.</p><button class="btn primary" data-act="editWork">+ Add a project / site</button></div>`;
-  const rows = S.works.map(w => {
-    const st = workStats(w.id), ents = st.entries;
-    const month = r2(ents.filter(e => (e.type === 'expense' || e.type === 'recoverable') && e.date >= f && e.date <= to).reduce((a, e) => a + e.amount, 0));
-    const last = ents.reduce((a, e) => (e.date > a ? e.date : a), '');
-    const withPeople = Math.max(0, r2(st.adv - st.viaStaff));
-    const byCat = {};
-    for (const e of ents) if (e.type === 'expense' || e.type === 'recoverable') byCat[e.categoryId || '_none'] = r2((byCat[e.categoryId || '_none'] || 0) + e.amount);
-    const topCats = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([id]) => catName(id));
-    return { w, st, month, last, withPeople, topCats };
-  }).sort((a, b) => (a.w.closed - b.w.closed) || (b.last > a.last ? 1 : b.last < a.last ? -1 : 0));
-  const open = rows.filter(r => !r.w.closed), closed = rows.filter(r => r.w.closed);
-  const tot = r2(open.reduce((a, r) => a + r.st.total, 0)), pend = r2(open.reduce((a, r) => a + r.st.recPending, 0)), held = r2(open.reduce((a, r) => a + r.withPeople, 0));
-  const card = r => {
-    const { w, st } = r, total = st.total || 0;
-    const ownPct = total ? st.own / total * 100 : 0;
-    return `<button class="iv-proj ${w.closed ? 'closed' : ''}" data-act="go" data-v="work" data-p="${w.id}">
-      <div class="iv-pt"><b>${esc(w.name)}</b>${w.closed ? '<span class="iv-flag">closed</span>' : ''}<span class="chev">›</span></div>
-      <div class="iv-ps">${[w.ref ? esc(w.ref) : '', r.last ? 'last entry ' + fmtShort(r.last) : 'no entries yet', st.entries.length ? st.entries.length + ' entr' + (st.entries.length === 1 ? 'y' : 'ies') : ''].filter(Boolean).join(' · ')}</div>
-      <div class="iv-pa">${money(total)}<span>spent so far</span></div>
-      ${total ? `<div class="iv-split" aria-hidden="true">${st.own ? `<i class="own" style="width:${ownPct}%"></i>` : ''}${st.rec ? `<i class="rec" style="width:${100 - ownPct}%"></i>` : ''}</div>
-      <div class="iv-legend">${st.own ? `<span><i class="k-own"></i>My own ${money(st.own)}</span>` : ''}${st.rec ? `<span><i class="k-rec"></i>To be repaid ${money(st.rec)}</span>` : ''}</div>` : ''}
-      <div class="iv-facts">
-        <div><span>${monthLabel(ym).split(' ')[0]}</span><b>${money(r.month)}</b></div>
-        <div><span>Still to get back</span><b class="${st.recPending ? 'in' : ''}">${money(st.recPending)}</b></div>
-        <div><span>Cash with people</span><b class="${r.withPeople ? 'warn' : ''}">${money(r.withPeople)}</b></div>
-      </div>
-      ${r.topCats.length ? `<div class="iv-ps">Mostly ${r.topCats.map(esc).join(', ')}</div>` : ''}</button>`;
-  };
-  return `<div class="iv-sum3">
-      <div><span>Open projects</span><b>${open.length}</b></div>
-      <div><span>Spent on them</span><b>${money(tot)}</b></div>
-      <div><span>To get back</span><b class="${pend ? 'in' : ''}">${money(pend)}</b></div></div>
-    ${held ? `<p class="iv-pace">Cash still with your people for these projects: <b>${money(held)}</b>. Ask them for bills or the change.</p>` : ''}
-    ${open.map(card).join('') || '<div class="muted small">All projects are closed.</div>'}
-    ${closed.length ? (ui.insClosed ? `<div class="iv-h">Closed</div>${closed.map(card).join('')}<button class="iv-more" data-act="insClosed">Hide closed</button>` : `<button class="iv-more" data-act="insClosed">Show ${closed.length} closed project${closed.length > 1 ? 's' : ''}</button>`) : ''}
-    <button class="btn block mt" data-act="editWork">+ Add a project / site</button>`;
+  if (!S.works.length) return `<div class="iv-empty"><b>Track a project, site or event</b><p>Group everything for one job, such as a building repair, a wedding or the govt vehicle, and see what it cost and what is still to come back.</p><button class="btn primary" data-act="editWork">+ Add a project</button></div>`;
+  const rows = S.works.filter(w => !w.closed).map(w => ({ w, st: workStats(w.id) })).sort((a, b) => b.st.total - a.st.total);
+  const tot = r2(rows.reduce((a, r) => a + r.st.total, 0)), pend = r2(rows.reduce((a, r) => a + r.st.recPending, 0)), done = S.works.length - rows.length;
+  return `<div class="psum">Open projects <b>${money(tot)}</b>${pend ? ` · To get back <b class="in">${money(pend)}</b>` : ''}</div>
+    <div class="list">${rows.map(projRow).join('') || '<div class="empty">No open projects.</div>'}</div>
+    ${done ? `<button class="iv-more" data-act="go" data-v="works">${done} finished ›</button>` : ''}`;
+}
+// One row for a project: name, one useful fact (only if there is one), amount, ›
+function projRow({ w, st }) {
+  const fact = st.recPending ? `<span class="in">${money(st.recPending)} to get back</span>` : w.closed ? 'Finished' : '';
+  return `<button class="list-item" data-act="go" data-v="work" data-p="${w.id}">
+    <span class="ico av" aria-hidden="true">${esc((w.name.trim()[0] || '?').toUpperCase())}</span>
+    <div class="li-main"><div class="li-title">${esc(w.name)}</div>${fact ? `<div class="li-sub">${fact}</div>` : ''}</div>
+    <div class="li-amt">${money(st.total)}</div><span class="chev" aria-hidden="true">›</span></button>`;
 }
 
 function ivPeople(ym) {
@@ -2336,7 +2309,7 @@ function ivPeople(ym) {
     ${so.length ? `<section class="iv-card"><div class="iv-h">Spent on people in ${monthLabel(ym).split(' ')[0]} <span>not paid back</span></div>
       <div class="iv-big">${money(soTot)}</div>
       ${so.map(([id, v]) => `<button class="iv-person" data-act="spentOnList" data-p="${id}" data-ym="${ym}"><span class="iv-av">${ivInitials(person(id).name)}</span>
-        <span class="grow"><span class="iv-rn">${esc(person(id).name)}</span><span class="iv-meter"><i style="width:${(v / soMax * 100).toFixed(1)}%"></i></span></span><b>${money(v)}</b></button>`).join('')}</section>` : ''}
+        <span class="grow"><span class="iv-rn">${esc(person(id).name)}</span></span><b>${money(v)}</b></button>`).join('')}</section>` : ''}
     <p class="iv-foot">Loans and money given to spend are not counted as your spending. Spending on family that is not paid back is.</p>`;
 }
 
