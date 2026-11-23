@@ -105,8 +105,12 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - + screen: note line always visible, Today / Yesterday / 2 days ago / Pick, Person key labelled, category required, tiles follow the chosen area or project, project fills its area, asks before discarding.
 - Fixes: editing a category no longer changes the area; payments that match an open bill ask to link; future dates ask; "Before Hisaab" only for dates before you started; receiving money nobody owed asks if it was lent before Hisaab; paid bills not listed twice; phone numbers saved as +92; every new category gets its own colour.
 
+## v41.2
+- Insights is one page: Income · Spent (your own) · Out to people & claims · In your accounts now; owed to you in total; Check your data link; Bills vs day-to-day; Categories (each with its own fixed colour) and Areas as ranked lists with change vs last month; Spent on people; Projects this month; Biggest one-off expenses; Month by month. The forecast, donut, Saved %, per day, paid with and tabs are gone.
+- + screen: one date chip (Today, tap to pick another day).
+- The installed app shows "A new version is ready · Update" when there is an update.
+
 ## Roadmap
-- v42 Insights (December, once there is a previous month): one page; summary (income, spent, with people, left in accounts); regular vs day-to-day; ranked categories and areas with fixed colours; spent on people; projects this month; biggest one-off; month by month. Removes the forecast, Saved %, per day, paid with, bills block and tabs.
 - v42 Projects: start line, running total, date range, category split, pin to Home.
 - v43 Claims: pick items → Submitted (date) → Received settles them together; statements for claims and personal money separately; "Regular payment" tick.
 - Then 30 days frozen for normal use.

@@ -148,7 +148,7 @@ const DB = {
 // ---------------- State ----------------
 let S = null;
 
-const PALETTE = ['#e8590c', '#2f9e44', '#1c7ed6', '#ae3ec9', '#f08c00', '#0c8599', '#d6336c', '#5f3dc4', '#74b816', '#c92a2a', '#3b5bdb', '#868e96'];
+const PALETTE = ['#e8590c', '#2f9e44', '#1c7ed6', '#ae3ec9', '#f08c00', '#0c8599', '#d6336c', '#5f3dc4', '#74b816', '#c92a2a', '#3b5bdb', '#868e96', '#8d5524', '#0ca678', '#f783ac', '#495057', '#fab005', '#15aabf'];
 function catColor(id) { const c = cat(id); return (c && c.color) || '#868e96'; }
 function personColor(p) { let h = 0; for (const ch of (p && p.id) || '') h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }
 const BILL_TYPES = [['Electricity', '#f08c00'], ['Gas', '#e8590c'], ['Water', '#1c7ed6'], ['Internet', '#5f3dc4'], ['Mobile', '#0c8599'], ['Rent', '#2f9e44'], ['Subscription', '#d6336c'], ['Other bill', '#868e96']];
@@ -185,10 +185,12 @@ function normalizeState(st) {
   if (!out.settings.last) out.settings.last = {};
   if (!Array.isArray(out.trash)) out.trash = [];
   out.categories.forEach((c, i) => { if (!c.color) c.color = PALETTE[i % PALETTE.length]; });
-  if (!out.settings.colorFix41) { // categories created before v41 all got the same colour
-    const seen = new Set(); let k = 0;
-    out.categories.filter(c => !c.bill).forEach(c => { if (seen.has(c.color)) { let tries = 0; while (seen.has(PALETTE[k % PALETTE.length]) && tries++ < PALETTE.length) k++; c.color = PALETTE[k % PALETTE.length]; k++; } seen.add(c.color); });
-    out.settings.colorFix41 = true;
+  if (!out.settings.colorFix412) { // categories created before v41 all got the same colour: give each spending category its own
+    for (const kind of ['out', 'in']) {
+      const seen = new Set();
+      out.categories.filter(c => !c.bill && c.kind === kind).forEach(c => { if (seen.has(c.color)) { const free = PALETTE.find(x => !seen.has(x)); if (free) c.color = free; } seen.add(c.color); });
+    }
+    out.settings.colorFix412 = true;
   }
   if (!out.categories.some(c => c.bill)) BILL_TYPES.forEach(([n, c]) => out.categories.push({ id: uid(), name: n, kind: 'out', bill: true, color: c }));
   out.settings.drive = { ...defaultDrive(), ...((st.settings && st.settings.drive) || {}) };
@@ -1202,7 +1204,7 @@ function chipSel(label, sel, icon, cls = '') {
 }
 function addChips(f, mode) {
   const T = TYPES[f.type] || TYPES.expense, has = k => T.f.includes(k);
-  const ab = accountBalances(), out = [];
+  const ab = accountBalances(), out = [dateChip(f)];
   const aOpt = (val, sel) => S.accounts.map(a => `<option value="${val(a)}" ${sel === val(a) ? 'selected' : ''}>${esc(a.name)} (${money(ab[a.id] || 0)})</option>`).join('');
   if (has('paidFrom')) {
     const k = f.paidFrom || '', pp = k.startsWith('p:') ? person(k.slice(2)) : null;
@@ -1237,11 +1239,9 @@ function addChips(f, mode) {
   return `<div class="achips">${out.join('')}</div>${extra}`;
 }
 function noteLine(f) { return `<input class="addnote" data-f="note" value="${esc(f.note)}" placeholder="Note: what was it for?" maxlength="200" aria-label="Note" autocomplete="off">`; }
-function dateRow(f) {
-  const t0 = today(), opts = [[0, 'Today'], [1, 'Yesterday'], [2, '2 days ago']];
-  const known = opts.some(([n]) => f.date === addDays(t0, -n));
-  return `<div class="dchips" role="group" aria-label="Date">${opts.map(([n, l]) => `<button type="button" class="dch ${f.date === addDays(t0, -n) ? 'on' : ''}" data-act="dateQuick" data-n="${n}">${l}</button>`).join('')}
-    <label class="dch pick ${known ? '' : 'on'}">${svgIcon('cal')}<span>${known ? 'Pick' : fmtShort(f.date)}</span><input type="date" data-f="date" value="${esc(f.date)}" aria-label="Pick a date"></label></div>`;
+function dateChip(f) {
+  const t0 = today(), dl = f.date === t0 ? 'Today' : f.date === addDays(t0, -1) ? 'Yesterday' : fmtShort(f.date);
+  return `<label class="ach ${f.date === t0 ? '' : 'on'}">${svgIcon('cal')}<span>${dl}</span><input type="date" data-f="date" value="${esc(f.date)}" aria-label="Date"></label>`;
 }
 function keypadHtml(mode, f) {
   const k = (v, cls = '', label = v, aria = '') => `<button type="button" class="kp ${cls}" data-act="kp" data-k="${v}" ${aria ? `aria-label="${aria}"` : ''}>${label}</button>`;
@@ -1316,7 +1316,7 @@ VIEWS.add = () => {
     parts.push(p ? `<div class="pline"><span class="ico av">${esc((p.name.trim()[0] || '?').toUpperCase())}</span><div class="grow"><b>${esc(p.name)}</b><span>${b > 0 ? 'owes you ' + money(b) : b < 0 ? 'you owe ' + money(-b) : 'all settled'}</span></div>${f.editingId ? '' : `<button type="button" class="link small" data-act="forOther">Change</button>`}</div>`
       : `<div class="pline"><div class="grow"><b>${f.dir === 'in' ? 'From whom?' : 'For whom?'}</b></div></div>`);
   }
-  parts.push(amountBlock(f), noteLine(f), dateRow(f));
+  parts.push(amountBlock(f), noteLine(f));
   if (f.sms) parts.push(smsBanner(f));
   if (f.linkExpected && f.type === 'expense') parts.push(billBanner(f));
   else if (f.txId && !f.sms) parts.push(`<div class="addmini"><input data-f="txId" value="${esc(f.txId)}" placeholder="Transaction ID" aria-label="Transaction ID"></div>`);
@@ -1687,7 +1687,7 @@ function openMenu() {
   const here = v => (cur.v === v ? ' on' : '');
   const it = (v, icon, label, meta, act) => `<button class="dr-item${here(v)}" ${act || `data-act="go" data-v="${v}"`}>${svgIcon(icon)}<span class="dr-l">${label}</span>${meta !== '' && meta != null ? `<span class="dr-m">${meta}</span>` : ''}</button>`;
   $('#menuPanel').innerHTML = `<div class="dr-head">
-      <div class="dr-brand"><img src="icon.svg?v=41.1" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
+      <div class="dr-brand"><img src="icon.svg?v=41.2" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
       <button class="dr-acct ${bad || off ? 'warn' : ''}" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span>${bad || off ? '<span class="dr-dot"></span>' : ''}</button>
     </div>
     <nav class="dr-nav" aria-label="Menu">
@@ -1707,7 +1707,7 @@ function openMenu() {
       ${it('prefs', 'gear', 'Preferences', '')}
       ${it('help', 'help', 'How to use', '')}
     </nav>
-    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v41.1</p>`;
+    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v41.2</p>`;
   $('#menu').hidden = false; menuOpen = true; pushHist();
   requestAnimationFrame(() => $('#menu').classList.add('open'));
 }
@@ -2380,15 +2380,67 @@ function ivTabs(tab) {
 }
 
 VIEWS.insights = () => {
-  const ym = insMonth || today().slice(0, 7), tab = ui.insTab || 'overview';
-  const isNow = ym === today().slice(0, 7);
-  const head = `<div class="iv-month">
+  const ym = insMonth || today().slice(0, 7), isNow = ym === today().slice(0, 7);
+  return `<div class="iv-month">
     <button class="icon-btn" data-act="insMove" data-n="-1" aria-label="Previous month">‹</button>
     <b>${monthLabel(ym)}</b>
-    <button class="icon-btn" data-act="insMove" data-n="1" aria-label="Next month" ${isNow ? 'disabled' : ''}>›</button></div>${ivTabs(tab)}`;
-  const body = tab === 'projects' ? ivProjects(ym) : tab === 'people' ? ivPeople(ym) : ivOverview(ym);
-  return head + `<div class="iv-body">${body}${tab === 'overview' && spendMonth(ym).total ? `<button class="btn block" data-act="shareMonth" data-ym="${ym}">Share ${monthLabel(ym).split(' ')[0]} summary on WhatsApp</button>` : ''}</div>`;
+    <button class="icon-btn" data-act="insMove" data-n="1" aria-label="Next month" ${isNow ? 'disabled' : ''}>›</button></div>
+    <div class="iv-body">${ivPage(ym)}</div>`;
 };
+// One page, in reading order: where the money is → fix-it → bills vs day-to-day → categories → areas → people → projects → one-offs → months
+function ivPage(ym) {
+  const [f, to] = monthBounds(ym), isNow = ym === today().slice(0, 7), cur = spendMonth(ym), prevYm = shiftYm(ym, -1), prev = spendMonth(prevYm), hasPrev = prev.total > 0;
+  const inc = incomeIn(f, to), inM = e => e.date >= f && e.date <= to;
+  if (!cur.total && !inc) return `<div class="iv-empty"><b>Nothing recorded in ${monthLabel(ym)}</b><p>Add a few entries and this page shows where your money went.</p><button class="btn primary" data-act="jump" data-tab="add">+ Add an entry</button></div>`;
+  const L = live();
+  // money that left your accounts to people or claims this month, minus what came back
+  const outP = r2(L.filter(e => inM(e) && !e.oldEntry && (e.accountId || e.viaPersonId) && ['recoverable', 'lent', 'advance'].includes(e.type)).reduce((a, e) => a + e.amount, 0));
+  const backP = r2(L.filter(e => inM(e) && ['recovery', 'received'].includes(e.type)).reduce((a, e) => a + e.amount, 0));
+  const withP = r2(outP - backP), ab = accountBalances(), inAcc = r2(S.accounts.reduce((a, x) => a + (ab[x.id] || 0), 0));
+  const pb = personBalances(), owedAll = r2(Object.values(pb).filter(v => v > 0).reduce((a, v) => a + v, 0));
+  const claimsAll = r2(S.people.reduce((a, p) => a + claimSplit(p.id).claims, 0));
+  const pct = (v, b) => b ? Math.round((v - b) / b * 100) : null;
+  const dlt = d => d === null ? '' : `<span class="iv-d ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${d > 0 ? '▲' : d < 0 ? '▼' : '='} ${Math.abs(d)}%</span>`;
+  const sum = `<section class="iv-card iv-sum">
+    <div class="iv-sum-grid">
+      <button data-act="insIncome"><span>Income</span><b class="in">${money(inc)}</b></button>
+      <button data-act="insSpent"><span>Spent (your own)</span><b class="out">${money(cur.total)}</b>${hasPrev ? `<small>${dlt(pct(cur.total, prev.total))} vs ${esc(monthLabel(prevYm).split(' ')[0])}</small>` : ''}</button>
+      <button data-act="jump" data-tab="people"><span>Out to people &amp; claims</span><b>${money(withP)}</b><small>to come back</small></button>
+      ${isNow ? `<button data-act="go" data-v="accounts"><span>In your accounts now</span><b>${money(inAcc)}</b></button>` : `<div><span>Left from income</span><b>${money(r2(inc - cur.total - withP))}</b></div>`}
+    </div>
+    ${owedAll ? `<p class="iv-owed">Owed to you in total <b>${money(owedAll)}</b>${claimsAll ? ` · official claims ${money(claimsAll)}` : ''}</p>` : ''}
+  </section>`;
+  const dc = isNow ? dataChecks() : [];
+  const fix = dc.length ? `<button class="alert" data-act="go" data-v="datacheck"><span class="grow"><b>Check your data</b> · ${dc.length} thing${dc.length > 1 ? 's' : ''} make${dc.length > 1 ? '' : 's'} these totals wrong</span>›</button>` : '';
+  // bills (paid against a bill) vs day-to-day
+  const billPaid = r2(L.filter(e => e.type === 'expense' && inM(e) && e.linkExpected).reduce((a, e) => a + e.amount, 0)), day = r2(cur.total - billPaid);
+  const prevDay = hasPrev ? r2(prev.total - L.filter(e => e.type === 'expense' && e.linkExpected && e.date >= prevYm + '-01' && e.date <= prevYm + '-31').reduce((a, e) => a + e.amount, 0)) : 0;
+  const split = cur.total ? `<section class="iv-card iv-pair2"><div><span>Bills</span><b>${money(billPaid)}</b><small>paid against a bill</small></div><div><span>Day-to-day</span><b>${money(day)}</b><small>${hasPrev ? dlt(pct(day, prevDay)) + ' vs last month' : 'everything else'}</small></div></section>` : '';
+  // ranked rows with a fixed colour per category (colour follows the category, not its rank)
+  const row = (act, attr, dot, name, v, base, prevV) => `<button class="iv-row" data-act="${act}" ${attr}>${dot ? `<i class="iv-sw" style="background:${dot}"></i>` : ''}<span class="grow"><span class="iv-rn">${esc(name)}</span></span><span class="iv-rv"><b>${money(v)}</b><span>${base ? Math.round(v / base * 100) + '%' : ''}${hasPrev && prevV !== undefined ? ' ' + dlt(pct(v, prevV || 0) === null ? null : prevV ? pct(v, prevV) : null) : ''}</span></span></button>`;
+  const cats = Object.entries(cur.byCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const showAll = ui.insAllCats, topN = cats.length > 8 ? 7 : 8, shown = showAll ? cats : cats.slice(0, topN), rest = cats.slice(topN), restV = r2(rest.reduce((a, c) => a + c[1], 0));
+  const catDot = id => id.startsWith('_') ? 'var(--c-other)' : (cat(id)?.color || 'var(--c-other)');
+  const catName2 = id => id === '_none' ? 'No category' : id === '_unrec' ? 'Not recorded' : catName(id);
+  const catsH = cats.length ? `<section class="iv-card"><div class="iv-h">Categories <span>tap for entries</span></div><div class="iv-list">
+    ${shown.map(([id, v]) => row('insCat', `data-c="${esc(id)}"`, catDot(id), catName2(id), v, cur.total, prev.byCat[id])).join('')}
+    ${!showAll && rest.length ? `<button class="iv-row" data-act="insAllCats"><i class="iv-sw" style="background:var(--c-other)"></i><span class="grow"><span class="iv-rn">${rest.length} more</span></span><span class="iv-rv"><b>${money(restV)}</b><span>${Math.round(restV / cur.total * 100)}%</span></span></button>` : ''}
+    ${showAll && rest.length ? '<button class="iv-more" data-act="insAllCats">Show less</button>' : ''}</div></section>` : '';
+  const books = Object.entries(cur.byBook).filter(([id, v]) => v > 0 && id !== '_none').sort((a, b) => b[1] - a[1]);
+  const areasH = books.length ? `<section class="iv-card"><div class="iv-h">Areas</div><div class="iv-list">${books.map(([id, v]) => row('insBook', `data-b="${esc(id)}"`, '', id === '_unrec' ? 'Not recorded' : bookName(id), v, cur.total, prev.byBook[id])).join('')}</div></section>` : '';
+  const so = Object.entries(spentOnTotals(f, to)).filter(([id, v]) => v > 0 && person(id)).sort((a, b) => b[1] - a[1]);
+  const peopleH = so.length ? `<section class="iv-card"><div class="iv-h">Spent on people <span>part of your spending</span></div><div class="iv-list">${so.map(([id, v]) => row('spentOnList', `data-p="${id}" data-ym="${ym}"`, '', person(id).name, v, 0)).join('')}</div></section>` : '';
+  const pj = S.works.map(w => { const es = L.filter(e => e.workId === w.id && (e.type === 'expense' || e.type === 'recoverable')); return { w, m: r2(es.filter(inM).reduce((a, e) => a + e.amount, 0)), all: r2(es.reduce((a, e) => a + e.amount, 0)) }; }).filter(x => x.m > 0).sort((a, b) => b.m - a.m);
+  const projH = pj.length ? `<section class="iv-card"><div class="iv-h">Projects this month</div><div class="iv-list">${pj.map(x => `<button class="iv-row" data-act="go" data-v="work" data-p="${x.w.id}"><span class="grow"><span class="iv-rn">${esc(x.w.name)}</span><span class="iv-sub">${money(x.all)} since it started</span></span><span class="iv-rv"><b>${money(x.m)}</b><span>this month</span></span></button>`).join('')}</div></section>` : '';
+  const big = L.filter(e => e.type === 'expense' && inM(e) && !e.linkExpected).sort((a, b) => b.amount - a.amount).slice(0, 3);
+  const bigH = big.length ? `<section class="iv-sec"><div class="iv-h">Biggest one-off expenses</div><div class="card flush">${big.map(e => entryItem(e)).join('')}</div></section>` : '';
+  const months0 = [5, 4, 3, 2, 1, 0].map(i => { const m = shiftYm(ym, -i); return { m, v: spendMonth(m).total }; });
+  const first = months0.findIndex(x => x.v > 0), months = first < 0 ? [] : months0.slice(first);
+  const trend = months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, ym)}</section>` : '';
+  return sum + fix + split + catsH + areasH + peopleH + projH + bigH + trend +
+    (cur.total ? `<button class="btn block" data-act="shareMonth" data-ym="${ym}">Share ${monthLabel(ym).split(' ')[0]} summary on WhatsApp</button>` : '') +
+    `<p class="iv-foot">"Spent" is your own money. Loans, official claims and money given to spend for you are kept out and shown as "Out to people &amp; claims".</p>`;
+}
 
 function ivOverview(ym) {
   const cur = spendMonth(ym), prev = spendMonth(shiftYm(ym, -1));
@@ -3316,7 +3368,7 @@ function areaClaimHint(bid) {
 // ---------------- App updates ----------------
 // An installed app on Android resumes from memory instead of reloading, so it can keep showing an old version.
 // On start and whenever it comes back to the screen, compare with the version on the server and offer a one-tap update.
-const APP_BUILD = 'hisaab-v41.1';
+const APP_BUILD = 'hisaab-v41.2';
 let updShown = false, updLast = 0;
 async function checkForUpdate() {
   if (!location.protocol.startsWith('http') || updShown || Date.now() - updLast < 60000) return;
@@ -3867,6 +3919,8 @@ const ACT = {
   insTab: el => { ui.insTab = el.dataset.t; ui.insAllCats = false; render(); window.scrollTo(0, 0); },
   insAllCats: () => { ui.insAllCats = !ui.insAllCats; render(); },
   insClosed: () => { ui.insClosed = !ui.insClosed; render(); },
+  insIncome: () => { const ym = insMonth || today().slice(0, 7); ui.entryFilter = { month: ym, type: 'income', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false }; go('entries'); },
+  insSpent: () => { const ym = insMonth || today().slice(0, 7); ui.entryFilter = { month: ym, type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: true }; go('entries'); },
   insBook: el => {
     const ym = insMonth || today().slice(0, 7), b = el.dataset.b;
     ui.entryFilter = { month: ym, type: '', book: b.startsWith('_') ? '' : b, person: '', work: '', q: '', drafts: false, spentOnly: true };

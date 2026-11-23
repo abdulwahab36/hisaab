@@ -1049,3 +1049,17 @@ details.more-acts summary { cursor: pointer; font-weight: 600; font-size: 14px; 
 .updbar { position: fixed; left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); z-index: 60; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-radius: 14px; background: var(--text); color: var(--bg); box-shadow: 0 6px 24px rgba(0,0,0,.25); font-size: 14px; font-weight: 600; }
 .updbar span { flex: 1; }
 body.addmode .updbar { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+/* v41.2 Insights page */
+.iv-sum { padding: 14px; }
+.iv-sum-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.iv-sum-grid > * { text-align: left; background: var(--surface); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-height: 72px; }
+.iv-sum-grid span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.iv-sum-grid b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.iv-sum-grid small { font-size: 11.5px; color: var(--muted); }
+.iv-owed { margin: 10px 2px 0; font-size: 13px; color: var(--muted); }
+.iv-owed b { color: var(--text); }
+.iv-pair2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; }
+.iv-pair2 > div { display: flex; flex-direction: column; gap: 2px; }
+.iv-pair2 span { font-size: 12px; color: var(--muted); font-weight: 600; } .iv-pair2 b { font-size: 17px; } .iv-pair2 small { font-size: 11.5px; color: var(--muted); }
+.iv-d { font-size: 11px; font-weight: 700; } .iv-d.up { color: var(--out); } .iv-d.down { color: var(--in); }
+.ach.on { color: var(--accent); }
