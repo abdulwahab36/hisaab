@@ -1687,7 +1687,7 @@ function openMenu() {
   const here = v => (cur.v === v ? ' on' : '');
   const it = (v, icon, label, meta, act) => `<button class="dr-item${here(v)}" ${act || `data-act="go" data-v="${v}"`}>${svgIcon(icon)}<span class="dr-l">${label}</span>${meta !== '' && meta != null ? `<span class="dr-m">${meta}</span>` : ''}</button>`;
   $('#menuPanel').innerHTML = `<div class="dr-head">
-      <div class="dr-brand"><img src="icon.svg?v=41" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
+      <div class="dr-brand"><img src="icon.svg?v=41.1" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
       <button class="dr-acct ${bad || off ? 'warn' : ''}" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span>${bad || off ? '<span class="dr-dot"></span>' : ''}</button>
     </div>
     <nav class="dr-nav" aria-label="Menu">
@@ -1707,7 +1707,7 @@ function openMenu() {
       ${it('prefs', 'gear', 'Preferences', '')}
       ${it('help', 'help', 'How to use', '')}
     </nav>
-    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v41</p>`;
+    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v41.1</p>`;
   $('#menu').hidden = false; menuOpen = true; pushHist();
   requestAnimationFrame(() => $('#menu').classList.add('open'));
 }
@@ -3312,6 +3312,36 @@ function areaClaimHint(bid) {
   return Object.entries(n).sort((a, b) => b[1] - a[1])[0][0];
 }
 
+
+// ---------------- App updates ----------------
+// An installed app on Android resumes from memory instead of reloading, so it can keep showing an old version.
+// On start and whenever it comes back to the screen, compare with the version on the server and offer a one-tap update.
+const APP_BUILD = 'hisaab-v41.1';
+let updShown = false, updLast = 0;
+async function checkForUpdate() {
+  if (!location.protocol.startsWith('http') || updShown || Date.now() - updLast < 60000) return;
+  updLast = Date.now();
+  try {
+    const t = await fetch('sw.js?check=' + Date.now(), { cache: 'no-store' }).then(r => r.ok ? r.text() : '');
+    const v = (t.match(/VERSION = '([^']+)'/) || [])[1];
+    if (v && v !== APP_BUILD) showUpdateBar(v);
+  } catch (e) { /* offline */ }
+}
+function showUpdateBar(v) {
+  updShown = true;
+  const bar = document.createElement('div');
+  bar.className = 'updbar'; bar.setAttribute('role', 'status');
+  bar.innerHTML = `<span>A new version of Hisaab is ready</span><button type="button" class="btn primary sm" id="updNow">Update</button>`;
+  document.body.appendChild(bar);
+  bar.querySelector('#updNow').onclick = async () => {
+    if (cur.v === 'add' && evalAmount(form.amount || '') > 0 && !(await confirmBox('Update now?', 'The entry you are typing will not be saved.', 'Update'))) return;
+    bar.querySelector('#updNow').textContent = 'Updating…';
+    try { const reg = await navigator.serviceWorker?.getRegistration(); if (reg) { await reg.update(); } } catch (e) { /* ignore */ }
+    try { const keys = await caches.keys(); await Promise.all(keys.filter(k => k !== v).map(k => caches.delete(k))); } catch (e) { /* ignore */ }
+    location.reload();
+  };
+}
+
 // ---------------- Sharing & reports ----------------
 function waNumber(phone) {
   let d = String(phone || '').replace(/\D/g, '');
@@ -4490,7 +4520,9 @@ async function init() {
   if (goParam && S.settings.onboarded && ['add', 'bills', 'people'].includes(goParam)) { history.replaceState({ h: 0 }, '', location.pathname); setTab(goParam); }
   if (shared && S.settings.onboarded) openFromSms(shared);
   if (S.settings.pinHash && !skip) showLock();
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
+  setTimeout(checkForUpdate, 2500);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if (ar) await handleAuthReturn(ar);
   else maybeAutoSync();
