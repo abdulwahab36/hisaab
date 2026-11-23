@@ -96,6 +96,21 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - Project page: name with Edit · Share · PDF, total, a short list of what needs doing (still to get back, cash with people, estimate left), + Spent / Gave to spend / Got paid back, then entries by month. Charts, the own-vs-repaid split and the vehicle fuel log are one tap away under Breakdown.
 - People → Owe me: "How old" is four numbers, no bars.
 
+## v41
+- Check your data (Home): accounts below zero, "Before Hisaab" used for recent payments, expenses without a category or area, bills paid but not linked, phone numbers to tidy. Each opens where you fix it.
+- Official claims: mark an area "Official: I pay now and claim it back later" and choose who repays. Expenses there are saved as claims; the person's page shows Official claims (by area) apart from Personal money.
+- All entries → Select → Change…: set area, project, category or who pays back for many entries at once.
+- Merge two areas or categories; turn an area into a project.
+- Any area can track fuel & km (car, bike, generator).
+- + screen: note line always visible, Today / Yesterday / 2 days ago / Pick, Person key labelled, category required, tiles follow the chosen area or project, project fills its area, asks before discarding.
+- Fixes: editing a category no longer changes the area; payments that match an open bill ask to link; future dates ask; "Before Hisaab" only for dates before you started; receiving money nobody owed asks if it was lent before Hisaab; paid bills not listed twice; phone numbers saved as +92; every new category gets its own colour.
+
+## Roadmap
+- v42 Insights (December, once there is a previous month): one page; summary (income, spent, with people, left in accounts); regular vs day-to-day; ranked categories and areas with fixed colours; spent on people; projects this month; biggest one-off; month by month. Removes the forecast, Saved %, per day, paid with, bills block and tabs.
+- v42 Projects: start line, running total, date range, category split, pin to Home.
+- v43 Claims: pick items → Submitted (date) → Received settles them together; statements for claims and personal money separately; "Regular payment" tick.
+- Then 30 days frozen for normal use.
+
 ## Help inside the app
 ☰ > How to use Hisaab: every task explained in plain steps with examples, with a search box.
 
