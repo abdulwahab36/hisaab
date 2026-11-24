@@ -110,10 +110,23 @@ On first open, Hisaab shows a short welcome: enter your account balances and pic
 - + screen: one date chip (Today, tap to pick another day).
 - The installed app shows "A new version is ready · Update" when there is an update.
 
+## v42
+- Person page: one history list with tags (not back yet, Rs … left, claimed, paid back), official vs personal split, big "I gave ↑ / I received ↓" buttons at the bottom, Remind on WhatsApp.
+- Claims: Submit claim (tick items, date) → Received settles that batch; Claim list on WhatsApp or PDF with total; a claim needs a category.
+- + screen: 000 key and Clear key, account sheet with icons, balances and + Add account, notes that remember (suggestions, category from earlier notes), coloured category icons, at most one DUE tile (due in 3 days), bold chips.
+- Bills use the same keypad screen (Bill to pay / Coming in, due date, repeats, account, optional calendar reminder).
+- Editing an old loan or repayment opens the person screen and keeps its type.
+- Regular payment tick; Insights "Bills & regular" counts them.
+- Office cash accounts: kept out of your own spending and your account total.
+- All entries: grouped by day with day totals; Calendar view (tap an empty day to add).
+- Projects: start date and days so far, running-total line, This month / Last month / Last 30 days, Pin to Home.
+- Home: income moved under the total, "Did you spend anything yesterday?" nudge, pinned project.
+- Icon picker for categories and accounts; contact picker for people (where the phone supports it).
+- ☰ → Daily reminder (phone calendar) and Check for update.
+- Closing a sheet with changes asks Keep editing / Discard.
+
 ## Roadmap
-- v42 Projects: start line, running total, date range, category split, pin to Home.
-- v43 Claims: pick items → Submitted (date) → Received settles them together; statements for claims and personal money separately; "Regular payment" tick.
-- Then 30 days frozen for normal use.
+- Next: 30 days frozen for normal use; fixes only.
 
 ## Help inside the app
 ☰ > How to use Hisaab: every task explained in plain steps with examples, with a search box.

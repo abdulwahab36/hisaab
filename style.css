@@ -1063,3 +1063,70 @@ body.addmode .updbar { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 .iv-pair2 span { font-size: 12px; color: var(--muted); font-weight: 600; } .iv-pair2 b { font-size: 17px; } .iv-pair2 small { font-size: 11.5px; color: var(--muted); }
 .iv-d { font-size: 11px; font-weight: 700; } .iv-d.up { color: var(--out); } .iv-d.down { color: var(--in); }
 .ach.on { color: var(--accent); }
+/* ===== v42 ===== */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* + screen: free space goes around the amount, everything else sits on the keypad */
+.addv .abig { flex: 1 0 auto; align-items: center; min-height: 84px; padding: 8px 0 0; }
+.addv .amount-preview { margin: 0 0 6px; }
+.keypad2 { margin-top: 0; }
+.achips .ach:not(.dim):not(.need) > span { font-weight: 650; }
+.nsug { display: flex; flex-direction: column; gap: 4px; margin: -4px 0 8px; }
+.nsg { display: flex; justify-content: space-between; gap: 10px; align-items: center; text-align: left; background: var(--accent-soft); border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.nsg b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .nsg span { color: var(--muted); white-space: nowrap; font-size: 12px; }
+/* coloured category icons */
+.ico.sq.cc { background: color-mix(in srgb, var(--cc) 16%, transparent); color: var(--cc); }
+.ctile svg { color: var(--cc, currentColor); }
+.ctile.on svg { color: inherit; }
+.iconpick { display: flex; flex-wrap: wrap; gap: 6px; }
+.ipk { width: 44px; height: 44px; border-radius: 12px; background: var(--surface); display: grid; place-items: center; color: var(--cc, var(--text)); }
+.ipk svg { width: 20px; height: 20px; }
+.ipk.on { outline: 2px solid var(--accent); background: var(--accent-soft); }
+.opt.prow.on { background: var(--accent-soft); } .opt.prow .tick { color: var(--accent); font-weight: 700; }
+.opt.prow .ico.sq { width: 34px; height: 34px; }
+.tag { display: inline-block; font-style: normal; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: 1px; background: var(--surface); color: var(--muted); }
+.tag.open { background: var(--warn-soft); color: var(--warn); } .tag.part { background: var(--warn-soft); color: var(--warn); } .tag.sub { background: var(--accent-soft); color: var(--accent); } .tag.done { color: var(--in); }
+/* person page */
+.pacts { margin: -4px 0 12px; }
+.claimbox { padding: 10px 12px; margin-bottom: 12px; }
+.cb-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.cb-acts { display: flex; gap: 8px; padding-top: 8px; flex-wrap: wrap; }
+.pbar { position: sticky; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px 0 4px; background: linear-gradient(transparent, var(--bg) 30%); z-index: 4; margin-top: 8px; }
+.pbar .btn.big { height: 52px; font-size: 16px; font-weight: 700; border-radius: 16px; }
+.pbar .btn.gave { background: var(--surface); } .pbar .btn.got { background: var(--surface); }
+.discardbar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; background: var(--warn-soft); color: var(--text); padding: 10px 12px; border-radius: 12px; margin-bottom: 10px; font-weight: 600; font-size: 14px; }
+.discardbar span { flex: 1; }
+/* entries */
+.dayh { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 14px 4px; font-size: 12.5px; font-weight: 700; color: var(--muted); background: var(--bg); }
+.dayh b { color: var(--text); font-weight: 650; }
+.calcard { padding: 12px; }
+.cal-h, .cal-g { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.cal-h span { text-align: center; font-size: 11px; color: var(--muted); font-weight: 600; padding-bottom: 4px; }
+.cal-d { min-height: 48px; border-radius: 10px; background: var(--surface); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.cal-d b { font-size: 13px; } .cal-d small { font-size: 10px; color: var(--muted); }
+.cal-d.miss { background: transparent; border: 1.5px dashed var(--line); } .cal-d.miss small { color: var(--accent); font-size: 14px; font-weight: 700; }
+.cal-d.ns small { color: var(--in); }
+.cal-d.fut { opacity: .35; background: transparent; }
+.cal-d.today { outline: 2px solid var(--accent); }
+/* project */
+.pj-start { margin: -6px 2px 12px; color: var(--muted); font-size: 13px; }
+.iv-run { width: 100%; height: auto; display: block; }
+.iv-run-l { fill: none; stroke: var(--accent); stroke-width: 2; }
+.pj-range { display: flex; align-items: center; gap: 10px; margin: 4px 0 8px; }
+.pj-range select { height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); padding: 0 10px; font: inherit; font-size: 14px; }
+/* home */
+.sum-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.sum-foot b { font-weight: 650; }
+.alert.nudge { display: flex; align-items: center; gap: 8px; }
+/* insights rows tighter */
+.iv-row { padding-top: 8px; padding-bottom: 8px; }
+/* tap targets */
+.hlinks .link, .hlinks a, .linkrow .link, .sec-title button, .link.deep { min-height: 44px; display: inline-flex; align-items: center; }
+.ef-sum .link { min-height: 40px; padding: 0 4px; display: inline-flex; align-items: center; }
+.iv-run .rl-base { stroke: var(--line); stroke-width: 1; }
+.iv-run .rl-dot { fill: var(--accent); stroke: var(--card, var(--bg)); stroke-width: 2; }
+.iv-run .rl-v { font-size: 12px; font-weight: 700; fill: var(--text); font-variant-numeric: tabular-nums; }
+.iv-run .rl-t { font-size: 11px; fill: var(--muted); }
+.pbar { background: var(--bg); box-shadow: 0 -10px 12px -6px var(--bg); }
+.kp.side { justify-content: center; align-items: center; }
+.iv-run text { stroke: none; }
+@media (max-height: 700px) { .addv .abig { min-height: 60px; padding-top: 4px; } }

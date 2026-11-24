@@ -384,7 +384,7 @@ function ownSpending(from, to) {
   let total = 0;
   const add = (bk, ct, v) => { total = r2(total + v); byBook[bk] = r2((byBook[bk] || 0) + v); byCat[ct] = r2((byCat[ct] || 0) + v); };
   for (const e of live()) {
-    if (e.type === 'expense' && e.date >= from && e.date <= to) add(e.bookId || '_none', e.categoryId || '_none', e.amount);
+    if (e.type === 'expense' && e.date >= from && e.date <= to && !isOfficeAcc(e.accountId)) add(e.bookId || '_none', e.categoryId || '_none', e.amount);
     if (e.type === 'recoverable' && e.writtenOff && e.writtenOff.date >= from && e.writtenOff.date <= to) add(e.bookId || '_none', e.categoryId || '_none', e.writtenOff.amount);
     if (e.type === 'adjustment' && e.amount < 0 && e.date >= from && e.date <= to) add('_unrec', '_unrec', -e.amount);
   }
@@ -446,6 +446,10 @@ function entrySub(e) {
 const STATUS_LBL = { pending: 'not back yet', partial: 'part back', recovered: 'paid back', 'written-off': 'written off' };
 const TYPE_ICO = { lent: '↗', advance: '↗', repaid: '↗', received: '↙', borrowed: '↙', transfer: '⇄', recovery: '↩', adjustment: '=', income: '+', expense: '•', recoverable: '↻', expected: '◷' };
 const ICON_PATHS = {
+  bank: 'M3 10l9-5.5L21 10M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18',
+  card: 'M3 6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5zM3 10h18M7 15h4',
+  gift: 'M4 11h16v9H4zM3 7h18v4H3zM12 7v13M12 7c-1.5-3-5-3.5-5-1.2C7 7 9.5 7 12 7zm0 0c1.5-3 5-3.5 5-1.2C17 7 14.5 7 12 7z',
+  cash: 'M3 7h18v10H3zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM6 10v4M18 10v4',
   pie: 'M21 12A9 9 0 1 1 12 3v9zM15 3.5A9 9 0 0 1 20.5 9H15z',
   list: 'M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01',
   folder: 'M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z',
@@ -492,7 +496,7 @@ const TYPE_SVG = { transfer: 'swap', income: 'wallet', expected: 'cal', recovery
 function entryIcon(e) {
   if (e.type === 'expected' && e.note && catIcon(e.note) !== 'receipt') return `<span class="ico sq">${svgIcon(catIcon(e.note))}</span>`;
   const c = cat(e.categoryId);
-  if (c) return `<span class="ico sq">${svgIcon(catIcon(c.name))}</span>`;
+  if (c) return `<span class="ico sq cc" style="--cc:${c.color || 'var(--muted)'}">${svgIcon(catIconOf(c))}</span>`;
   const p = person(e.personId) || person(e.viaPersonId);
   if (p && ['lent', 'advance', 'repaid', 'received', 'borrowed', 'recovery'].includes(e.type)) return personAvatar(p);
   return `<span class="ico sq">${svgIcon(TYPE_SVG[e.type] || 'receipt')}</span>`;
@@ -567,7 +571,7 @@ window.addEventListener('popstate', () => {
   navDepth = Math.max(0, navDepth - 1);
   if (ignorePop) { ignorePop = false; return; }
   if (menuOpen) { closeMenu('pop'); return; }
-  if (sheetOpen) { closeSheet(); pushHist(); return; }
+  if (sheetOpen) { userCloseSheet(); pushHist(); return; }
   if (!$('#lock').hidden) { pushHist(); return; }
   if (stack.length) stepBack();
   else if (cur.v !== 'home' && S.settings.onboarded) { tab = 'home'; cur = { v: 'home', p: null }; render(); window.scrollTo(0, 0); }
@@ -607,14 +611,14 @@ function render() {
   if (cur.v === 'add' && form.editingId) title = form.draftId ? 'Complete entry' : 'Edit entry';
   if (cur.v === 'add' && form.type === 'expected' && form.direction === 'out') title = form.editingId ? 'Edit bill' : 'Add bill';
   if (cur.v === 'add' && form.kind === 'person' && !form.viaFor && person(form.personId)) title = person(form.personId).name;
-  $('#title').textContent = title;
+  $('#title').textContent = title; $('#title').hidden = !title;
   const rootTab = !stack.length && ['home', 'people', 'bills', 'insights', 'more'].includes(cur.v);
   const addNew = cur.v === 'add' && addMode() !== 'legacy';
   document.body.classList.toggle('roottab', rootTab);
   document.body.classList.toggle('nohead', rootTab || addNew);
   document.body.classList.toggle('addmode', addNew);
   const fn = VIEWS[cur.v] || VIEWS.home;
-  $('#view').innerHTML = fn(cur.p);
+  $('#view').innerHTML = ((rootTab || addNew) ? `<h1 class="sr-only">${esc(addNew ? (form.type === 'expected' ? 'Add bill' : 'Add entry') : ({ home: 'Home', people: 'People', bills: 'Bills', insights: 'Insights', more: 'More' })[cur.v] || 'Hisaab')}</h1>` : '') + fn(cur.p);
   if (cur.v === 'add') { afterAddRender(); fitAmount(); }
   saveNav();
 }
@@ -728,6 +732,8 @@ VIEWS.home = () => {
   else if (dueP.length > 1) alerts.push(`<button class="alert" data-act="jump" data-tab="people"><span class="grow"><b>${dueP.length} people</b> past a promised payment date</span>›</button>`);
   const bud = budgetRows(t.slice(0, 7)).rows.filter(r => r.state === 'over' || r.state === 'near').sort((a, b) => b.pct - a.pct);
   if (bud.length) { const r = bud[0]; alerts.push(`<button class="alert" data-act="go" data-v="budgets"><span class="grow"><b>${esc(r.label)} ${r.state === 'over' ? 'over budget' : 'budget ' + Math.round(r.pct * 100) + '% used'}</b> · ${r.state === 'over' ? money(-r.left) + ' over' : money(r.left) + ' left'}${bud.length > 1 ? ` · +${bud.length - 1} more` : ''}</span>›</button>`); }
+  if (missedYesterday()) alerts.unshift(`<div class="alert info nudge"><span class="grow"><b>Nothing recorded yesterday</b></span><button class="btn sm primary" data-act="nudgeAdd">Add</button><button class="btn sm" data-act="nudgeNone">Nothing spent</button></div>`);
+  { const pw = work(S.settings.pinnedWork); if (pw && !pw.closed) { const tl = workTimeline(pw.id); alerts.unshift(`<button class="alert info pinw" data-act="go" data-v="work" data-p="${pw.id}"><span class="grow"><b>${esc(pw.name)}</b> · ${money(tl ? tl.total : 0)}${tl ? ' in ' + tl.days + ' day' + (tl.days > 1 ? 's' : '') : ''}</span>›</button>`); } }
   if (drafts.length) alerts.push(`<button class="alert info" data-act="goEntries" data-filter="draft"><span class="grow"><b>${drafts.length} incomplete</b> receipt${drafts.length > 1 ? 's' : ''} to fill in</span>›</button>`);
   const dv = S.settings.drive;
   const dLast = dv.lastBackup ? dv.lastBackup.slice(0, 10) : '';
@@ -751,7 +757,7 @@ VIEWS.home = () => {
     const pv = ownSpending(per.prev.from, per.prev.to).total, d = r2(sp.total - pv);
     if (pv && sp.total) cmp = d === 0 ? `Same as ${per.prev.label}` : `${money(Math.abs(d))} ${d > 0 ? 'more' : 'less'} than ${per.prev.label}${per.isCurrent ? ' by this date' : ''}`;
   }
-  const areas = Object.entries(sp.byBook).filter(([, v]) => v > 0).sort((x, y) => y[1] - x[1]).slice(0, 4);
+  const areas = Object.entries(sp.byBook).filter(([id, v]) => v > 0 && id !== '_none').sort((x, y) => y[1] - x[1]).slice(0, 4);
   const hasAny = live().length > 0;
   const sk0 = streakInfo();
   const homebar = `<div class="homebar">
@@ -775,18 +781,17 @@ VIEWS.home = () => {
       <span class="big">${money(sp.total)}</span>
       <span class="sub">${sp.total ? (cmp || 'Your own money. Loans and money you will get back are not counted.') : 'Nothing spent in this period'}</span>
     </button>
-    ${areas.length || inc ? `<div class="kvs">
-      ${areas.map(([id, v]) => `<button class="kv" data-act="goEntries" data-filter="spent" data-book="${id}"><span>${esc(bookName(id))}</span><b>${money(v)}</b></button>`).join('')}
-      ${inc ? `<div class="kv inc"><span>Income</span><b class="in">${money(inc)}</b></div>` : ''}
+    ${areas.length ? `<div class="kvs">
+      ${areas.map(([id, v]) => `<button class="kv" data-act="goEntries" data-filter="spent" data-book="${id}"><span>${esc(id === '_unrec' ? 'Not recorded' : bookName(id))}</span><b>${money(v)}</b></button>`).join('')}
     </div>` : ''}
     ${(() => { if (P.k !== 'month' || !(S.budgets && S.budgets.total > 0)) return ''; const r = budgetRows(P.ym).rows.find(x => x.k === 'total'); const fr = budgetRows(P.ym).frac;
       return `<button class="hbud ${r.state}" data-act="go" data-v="budgets"><div class="bar"><i style="width:${Math.min(100, r.pct * 100)}%"></i>${fr > 0 && fr < 1 ? `<em style="left:${fr * 100}%"></em>` : ''}</div><div class="hbud-sub"><span>${r.left >= 0 ? money(r.left) + ' left' : money(-r.left) + ' over budget'}</span><span>of ${money(r.budget)} budget</span></div></button>`; })()}
-    <button class="link deep" data-act="openInsights">${P.k === 'month' ? 'See full breakdown' : `See ${monthLabel(insYm()).split(' ')[0]} breakdown`} ›</button>
+    <div class="sum-foot">${inc ? `<span>Income <b class="in">${money(inc)}</b></span>` : '<span></span>'}<button class="link deep" data-act="openInsights">${P.k === 'month' ? 'Full breakdown' : `${monthLabel(insYm()).split(' ')[0]} breakdown`} ›</button></div>
   </div>`;
   return `${homebar}
   ${sampleBanner()}
   ${hero}
-  ${alerts.length ? '<div class="sec-title">Needs attention</div>' : ''}
+  ${alerts.length ? '<div class="sec-title">Needs your attention</div>' : ''}
   ${shownAlerts.join('')}
   ${alerts.length > 2 ? `<button class="link small" style="margin:-2px 2px 8px" data-act="toggleAlerts">${ui.allAlerts ? 'Show less' : 'Show ' + (alerts.length - 2) + ' more'}</button>` : ''}
 
@@ -865,31 +870,34 @@ function peopleList() {
 VIEWS.person = (pid) => {
   const p = person(pid);
   if (!p) return '<div class="empty">Person not found.</div>';
-  const bal = personBalances()[pid] || 0;
-  const lines = personLines(pid);
-  const am = allocMap();
+  const bal = personBalances()[pid] || 0, lines = personLines(pid), am = allocMap();
   const openRec = live().filter(e => e.type === 'recoverable' && e.personId === pid && recInfo(e, am).remaining > 0);
-  const shown = lines;
-  const balTxt = bal > 0 ? `${esc(p.name)} owes you` : bal < 0 ? `You owe ${esc(p.name)}` : 'All settled';
   const monthName = ym => new Date(+ym.slice(0, 4), +ym.slice(5, 7) - 1, 1).toLocaleString('en-GB', { month: 'long', year: 'numeric' });
   let lastYm = '';
-  const hist = [...shown].reverse().map(l => {
-    const ym = l.date.slice(0, 7);
-    const head = ym !== lastYm ? `<div class="month">${monthName(ym)}</div>` : '';
+  // One list: every entry once, open items carry their status
+  const hist = [...lines].reverse().map(l => {
+    const ym = l.date.slice(0, 7), head = ym !== lastYm ? `<div class="month">${monthName(ym)}</div>` : '';
     lastYm = ym;
-    const c = cat(l.e.categoryId);
-    const settle = ['repaid', 'received', 'recovery'].includes(l.e.type) || l.label === 'Written off';
-    const what = l.label.startsWith('Paid back:') ? l.label : (l.e.note || (c && c.name) || l.label);
-    const sub = [what !== l.label ? l.label : '', l.e.workId && work(l.e.workId) ? work(l.e.workId).name : ''].filter(Boolean).join(' · ');
+    const e = l.e, c = cat(e.categoryId), settle = ['repaid', 'received', 'recovery'].includes(e.type) || l.label === 'Written off';
+    const what = l.label.startsWith('Paid back:') ? l.label : (e.note || (c && c.name) || l.label);
+    const sub = [isClaim(e) ? 'Official claim' : what !== l.label ? l.label : '', e.bookId && book(e.bookId) ? bookName(e.bookId) : '', e.workId && work(e.workId) ? work(e.workId).name : ''].filter(Boolean).join(' · ');
+    let tag = '';
+    if (e.type === 'recoverable') { const ri = recInfo(e, am); if (ri.remaining > 0) tag = e.claimSub ? `<em class="tag sub">claimed ${fmtShort(e.claimSub)}</em>` : ri.remaining < e.amount ? `<em class="tag part">${money(ri.remaining)} left</em>` : '<em class="tag open">not back yet</em>'; else tag = '<em class="tag done">paid back</em>'; }
     const d = new Date(l.date + 'T00:00:00');
-    return `${head}<button class="hrow" data-act="openEntry" data-id="${l.e.id}">
+    return `${head}<button class="hrow" data-act="openEntry" data-id="${e.id}">
       <span class="hdate"><small>${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[d.getMonth()]}</small><b>${String(d.getDate()).padStart(2, '0')}</b></span>
-      ${entryIcon(l.e)}
-      <span class="li-main"><span class="li-title">${esc(what)}</span>${sub ? `<span class="li-sub">${esc(sub)}</span>` : ''}</span>
+      ${entryIcon(e)}
+      <span class="li-main"><span class="li-title">${esc(what)}</span>${sub || tag ? `<span class="li-sub">${esc(sub)}${tag}</span>` : ''}</span>
       <span class="hamt ${settle ? '' : l.v > 0 ? 'in' : 'out'}"><small>${l.label === 'Written off' ? 'written off' : settle ? 'paid back' : l.v > 0 ? 'you gave' : 'you got'}</small>${money(Math.abs(l.v))}</span>
     </button>`;
   }).join('');
   const balLine = bal > 0 ? `<span class="lbl">${esc(p.name)} owes you</span><b class="in">${money(bal)}</b>` : bal < 0 ? `<span class="lbl">You owe ${esc(p.name)}</span><b class="out">${money(-bal)}</b>` : `<span class="lbl">Balance</span><b>All settled</b>`;
+  const cs = claimSplit(pid), personal = r2(bal - cs.claims), newClaims = claimItems(pid).filter(e => !e.claimSub).length, batches = claimBatches(pid);
+  const split = cs.claims ? `<div class="psplit"><div><span>Official claims</span><b class="in">${money(cs.claims)}</b><small>${Object.entries(cs.by).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${esc(k)} ${money(v)}`).join(' · ')}</small></div><div><span>Personal</span><b class="${personal > 0 ? 'in' : personal < 0 ? 'out' : ''}">${personal > 0 ? money(personal) : personal < 0 ? '−' + money(-personal) : 'settled'}</b><small>${personal > 0 ? 'owes you' : personal < 0 ? 'you owe' : 'loans &amp; other'}</small></div></div>` : '';
+  const claimsBox = cs.claims ? `<div class="card claimbox">
+      ${batches.map(b => `<div class="cb-row"><span class="grow"><b>Claim of ${fmtShort(b.date)}</b><br><span class="small muted">${b.ids.length} item${b.ids.length > 1 ? 's' : ''} · ${money(b.rem)} waiting</span></span><button class="btn sm primary" data-act="claimReceived" data-k="${esc(b.k)}" data-p="${pid}">Received</button></div>`).join('')}
+      <div class="cb-acts">${newClaims ? `<button class="btn sm" data-act="claimSheet" data-p="${pid}">Submit claim (${newClaims})</button>` : ''}<button class="btn sm" data-act="claimShare" data-p="${pid}">Claim list</button></div></div>` : '';
+  const actions = [bal ? `<button class="link" data-act="settleUp" data-p="${pid}">Settle up</button>` : '', openRec.some(e => !isClaim(e)) ? `<button class="link" data-act="recoverForPerson" data-p="${pid}">They paid back</button>` : '', personal > 0 && p.phone ? `<button class="link" data-act="remindWA" data-p="${pid}">Remind on WhatsApp</button>` : ''].filter(Boolean).join('<span>·</span>');
   return `
   <div class="phero">
     ${personAvatar(p).replace('ico av', 'ico av lg')}
@@ -897,20 +905,15 @@ VIEWS.person = (pid) => {
       <div class="hlinks"><button class="link" data-act="editPerson" data-id="${pid}">Edit</button>${lines.length ? `<span>·</span><button class="link" data-act="sharePerson" data-p="${pid}">Share</button>` : ''}${p.phone ? `<span>·</span><a class="link" href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">Call</a>` : ''}</div></div>
   </div>
   <div class="pbal">${balLine}</div>
-  ${(() => { const cs = claimSplit(pid); if (!cs.claims) return ''; const personal = r2(bal - cs.claims);
-    return `<div class="psplit"><div><span>Official claims</span><b class="in">${money(cs.claims)}</b><small>${Object.entries(cs.by).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${esc(k)} ${money(v)}`).join(' · ')}</small></div><div><span>Personal</span><b class="${personal > 0 ? 'in' : personal < 0 ? 'out' : ''}">${personal > 0 ? money(personal) : personal < 0 ? '−' + money(-personal) : 'settled'}</b><small>${personal > 0 ? 'owes you' : personal < 0 ? 'you owe' : 'loans &amp; other'}</small></div></div>`; })()}
+  ${split}
+  ${actions ? `<div class="hlinks pacts">${actions}</div>` : ''}
+  ${claimsBox}
   ${(() => { const ym = today().slice(0, 7), m = spentOnTotals(ym + '-01', ym + '-31')[pid] || 0, y = spentOnTotals(ym.slice(0, 4) + '-01-01', ym.slice(0, 4) + '-12-31')[pid] || 0;
     return y ? `<button class="spenton" data-act="spentOnList" data-p="${pid}" data-ym="${ym}"><span>Spent on ${esc(p.name)}</span><b>${money(m)}</b><span class="muted small">this month · ${money(y)} this year ›</span></button>` : ''; })()}
   ${dueTag(p, bal) ? `<div class="small muted" style="margin:-6px 0 10px">${dueTag(p, bal)} <button class="link small" data-act="editPerson" data-id="${pid}">change</button></div>` : ''}
-  <div class="pills pfit">
-    ${bal ? `<button class="pill primary" data-act="settleUp" data-p="${pid}">Settle up</button>` : ''}
-    <button class="pill gave" data-act="personMoney" data-dir="out" data-p="${pid}"><span class="out">−</span> I gave / paid</button>
-    <button class="pill got" data-act="personMoney" data-dir="in" data-p="${pid}"><span class="in">+</span> I received</button>
-  </div>
-  ${(() => { const oc = openRec.filter(isClaim), op = openRec.filter(e => !isClaim(e)), blk = (t, l) => l.length ? `<div class="sec-title">${t} <button data-act="recoverForPerson" data-p="${pid}">They paid back</button></div><div class="list">${l.sort(sortDesc).map(e => entryItem(e, { owed: true })).join('')}</div>` : '';
-    return blk('Official claims to get back', oc) + blk(oc.length ? 'Personal: to get back' : 'To get back', op); })()}
   <div class="sec-title">History</div>
-  <div class="list">${!lines.length ? `<div class="empty">${spentOnTotals('0000-01-01', '9999-12-31')[pid] ? `No loans or money to get back with ${esc(p.name)}. Spending on them is shown above.` : 'No entries with this person yet. Use <b>I gave</b> or <b>I received</b> above.'}</div>` : !shown.length ? '<div class="empty">Nothing here.</div>' : hist}</div>`;
+  <div class="list">${!lines.length ? `<div class="empty">${spentOnTotals('0000-01-01', '9999-12-31')[pid] ? `No loans or money to get back with ${esc(p.name)}. Spending on them is shown above.` : 'No entries with this person yet. Use <b>I gave</b> or <b>I received</b> below.'}</div>` : hist}</div>
+  <div class="pbar"><button class="btn big gave" data-act="personMoney" data-dir="out" data-p="${pid}"><span class="out">↑</span> I gave</button><button class="btn big got" data-act="personMoney" data-dir="in" data-p="${pid}"><span class="in">↓</span> I received</button></div>`;
 };
 
 // ---------------- Add / edit form ----------------
@@ -1013,7 +1016,7 @@ function resetForm(over = {}) {
     accountId: L.accountId || (S.accounts[0]?.id || ''), toAccountId: '', bookId: '', categoryId: '', workId: '',
     personId: '', recoverFrom: '', dueDate: '', direction: 'in', repeat: '', note: '',
     receipt: '', receiptData: '', saveTpl: false, tplName: '', txId: '', units: '', billRef: '', sms: null, litres: '', odo: '',
-    editingId: null, draftId: null, linkExpected: null, returnTo: null, fromQuick: false, forId: '', what: '', viaFor: false, forcedType: '', forOpen: false, claim: false, claimOff: false, bookTouched: false, ...u, ...over
+    editingId: null, draftId: null, linkExpected: null, returnTo: null, fromQuick: false, forId: '', what: '', viaFor: false, forcedType: '', forOpen: false, claim: false, claimOff: false, bookTouched: false, lockWhat: false, regular: false, remind: false, ...u, ...over
   };
   if (!form.forId && form.dir === 'out' && form.recoverFrom && ['me', 'back'].includes(form.kind)) { form.forId = form.recoverFrom; form.what = form.kind === 'back' ? 'back' : 'gone'; form.viaFor = true; }
   deriveType();
@@ -1188,8 +1191,8 @@ function addLegacy() {
 // Own money on the + screen; money with a person uses the same screen in "person" mode.
 function addMode() {
   const f = form;
-  const billOnly = f.type === 'expected' && f.direction === 'out' && (f.billOnly || f.editingId);
-  if (billOnly || f.later || f.type === 'expected' || formLocked()) return 'legacy';
+  if (formLocked()) return 'legacy';
+  if (f.later || f.type === 'expected') return 'bill';
   if (f.kind === 'person' && !f.viaFor) return 'legacy';
   if (f.dir !== 'move' && (f.forId || f.viaFor || f.kind === 'back')) return 'person';
   return 'simple';
@@ -1214,12 +1217,14 @@ function addChips(f, mode) {
     const hold = S.people.filter(p => holders.has(p.id) && (pb[p.id] || 0) > 0);
     const holdOpts = hold.map(p => `<option value="p:${p.id}" ${k === 'p:' + p.id ? 'selected' : ''}>${esc(p.name)} (holds ${money(pb[p.id])})</option>`).join('');
     const extraP = pp && !hold.some(p => p.id === pp.id) ? `<option value="${k}" selected>Paid by ${esc(pp.name)}</option>` : '';
-    out.push(chipSel(label, `<select data-f="paidFrom" aria-label="Paid from">${k ? '' : '<option value="" selected>Choose</option>'}<optgroup label="My accounts">${aOpt(a => 'a:' + a.id, k)}</optgroup>${holdOpts ? `<optgroup label="Money I gave them to spend">${holdOpts}</optgroup>` : ''}${extraP}${f.type === 'recoverable' ? `<option value="old" ${k === 'old' ? 'selected' : ''}>Before Hisaab (no account)</option>` : ''}</select>`, pp ? 'users' : 'wallet', k ? '' : 'need'));
+    void holdOpts; void extraP;
+    out.push(`<button type="button" class="ach ${k ? '' : 'need'}" data-act="accSheet" data-k="paidFrom" aria-label="Paid from">${svgIcon(pp ? 'users' : k.startsWith('a:') ? accIconOf(acc(k.slice(2))) : 'wallet')}<span>${label}</span></button>`);
   }
   if (has('account')) {
     const old = ['lent', 'borrowed', 'advance', 'received', 'repaid'].includes(f.type);
     const label = f.accountId === '__old' ? 'Before Hisaab' : acc(f.accountId) ? esc(acc(f.accountId).name) : f.type === 'transfer' ? 'From' : 'Account';
-    out.push(chipSel((f.type === 'transfer' ? 'From ' : '') + label, `<select data-f="accountId" aria-label="Account">${f.accountId ? '' : '<option value="" selected>Choose</option>'}${aOpt(a => a.id, f.accountId)}${old ? `<option value="__old" ${f.accountId === '__old' ? 'selected' : ''}>Before Hisaab (no account)</option>` : ''}</select>`, 'wallet', f.accountId ? '' : 'need'));
+    void old;
+    out.push(`<button type="button" class="ach ${f.accountId ? '' : 'need'}" data-act="accSheet" data-k="accountId" aria-label="Account">${svgIcon(acc(f.accountId) ? accIconOf(acc(f.accountId)) : 'wallet')}<span>${(f.type === 'transfer' ? 'From ' : '') + label}</span></button>`);
   }
   if (has('toAccount')) out.push(chipSel('To ' + (acc(f.toAccountId) ? esc(acc(f.toAccountId).name) : '…'), `<select data-f="toAccountId" aria-label="To account"><option value="">Choose</option>${aOpt(a => a.id, f.toAccountId)}</select>`, 'swap', f.toAccountId ? '' : 'need'));
   if (mode === 'person' && (has('cat'))) {
@@ -1238,7 +1243,7 @@ function addChips(f, mode) {
   if (((vw && vw.vehicle) || book(f.bookId)?.vehicle) && ['expense', 'recoverable'].includes(f.type)) extra += `<div class="addmini"><input data-f="litres" value="${esc(f.litres || '')}" inputmode="decimal" placeholder="Litres" aria-label="Litres"><input data-f="odo" value="${esc(f.odo || '')}" inputmode="numeric" placeholder="Odometer km" aria-label="Odometer km"></div>`;
   return `<div class="achips">${out.join('')}</div>${extra}`;
 }
-function noteLine(f) { return `<input class="addnote" data-f="note" value="${esc(f.note)}" placeholder="Note: what was it for?" maxlength="200" aria-label="Note" autocomplete="off">`; }
+function noteLine(f) { return `<input class="addnote" data-f="note" value="${esc(f.note)}" placeholder="${f.type === 'expected' ? 'Name: e.g. LESCO electricity' : 'Note: what was it for?'}" maxlength="200" aria-label="${f.type === 'expected' ? 'Bill name' : 'Note'}" autocomplete="off"><div id="nsug" class="nsug" hidden></div>`; }
 function dateChip(f) {
   const t0 = today(), dl = f.date === t0 ? 'Today' : f.date === addDays(t0, -1) ? 'Yesterday' : fmtShort(f.date);
   return `<label class="ach ${f.date === t0 ? '' : 'on'}">${svgIcon('cal')}<span>${dl}</span><input type="date" data-f="date" value="${esc(f.date)}" aria-label="Date"></label>`;
@@ -1247,12 +1252,12 @@ function keypadHtml(mode, f) {
   const k = (v, cls = '', label = v, aria = '') => `<button type="button" class="kp ${cls}" data-act="kp" data-k="${v}" ${aria ? `aria-label="${aria}"` : ''}>${label}</button>`;
   const side = mode === 'person'
     ? `<button type="button" class="kp side" data-act="toMe" aria-label="Back to my own spending">${svgIcon('wallet')}<small>Mine</small></button>`
-    : f.dir === 'move' || f.editingId ? '<span class="kp blank"></span>'
+    : f.dir === 'move' || f.editingId || f.type === 'expected' ? `<button type="button" class="kp side" data-act="kp" data-k="C" aria-label="Clear amount"><small style="font-size:13px">Clear</small></button>`
       : `<button type="button" class="kp side" data-act="toPersonPick" aria-label="Money with a person">${svgIcon('users')}<small>Person</small></button>`;
   return `<div class="keypad2">
     ${k('1')}${k('2')}${k('3')}${k('⌫', 'op', '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5H9l-6 7 6 7h12zM18 9l-6 6M12 9l6 6"/></svg>', 'Delete (hold to clear)')}
     ${k('4')}${k('5')}${k('6')}${k('+', 'op plus', '+', 'Plus')}
-    ${k('7')}${k('8')}${k('9')}${k('-', 'op minus', '−', 'Minus')}
+    ${k('7')}${k('8')}${k('9')}${k('000', 'op', '000', 'Three zeros')}
     ${k('.', '', '.')}${k('0')}${side}<button type="button" class="kp ok" data-act="saveForm" aria-label="${f.editingId && !f.draftId ? 'Update' : 'Save'}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button>
   </div>`;
 }
@@ -1285,16 +1290,18 @@ function catTiles(f) {
   live().forEach(e => { if (!e.categoryId) return; use[e.categoryId] = (use[e.categoryId] || 0) + 1; if (scope && scope(e)) loc[e.categoryId] = (loc[e.categoryId] || 0) + 1; });
   const cats = S.categories.filter(c => c.kind === kind && (!c.bill || c.id === f.categoryId)).map((c, i) => ({ c, i })).sort((a, b) => (loc[b.c.id] || 0) - (loc[a.c.id] || 0) || (use[b.c.id] || 0) - (use[a.c.id] || 0) || a.i - b.i).map(x => x.c);
   const bills = kind === 'out' && f.type === 'expense' && !f.linkExpected && !f.editingId
-    ? live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date <= addDays(today(), 7) && !(f.bookId && e.bookId && e.bookId !== f.bookId) && !live().some(p => p.type === 'expense' && !p.linkExpected && billMatch(p) === e)).sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 2) : [];
+    ? live().filter(e => e.type === 'expected' && e.direction === 'out' && !expectedInfo(e).closed && e.date <= addDays(today(), 3) && !(f.bookId && e.bookId && e.bookId !== f.bookId) && !live().some(p => p.type === 'expense' && !p.linkExpected && billMatch(p) === e)).sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 2) : [];
+  if (bills.length > 1) bills.splice(1);
   const all = ui.allCats, slots = 7 - bills.length;
   let shown = all ? cats : cats.slice(0, slots);
   if (!all && f.categoryId && !shown.some(c => c.id === f.categoryId)) { const s = cats.find(c => c.id === f.categoryId); if (s) shown = [...shown.slice(0, slots - 1), s]; }
-  const tile = c => `<button type="button" class="ctile ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}">${svgIcon(catIcon(c.name))}<span>${esc(c.name)}</span></button>`;
+  const tile = c => `<button type="button" class="ctile ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}" style="--cc:${c.color || 'var(--muted)'}">${svgIcon(catIconOf(c))}<span>${esc(c.name)}</span></button>`;
   return `<div class="ctiles">${all ? '' : bills.map(e => `<button type="button" class="ctile bill" data-act="useBill" data-id="${e.id}">${svgIcon(catIcon(e.note || cat(e.categoryId)?.name))}<span>${esc(entryTitle(e))}</span><em>due</em></button>`).join('')}${shown.map(tile).join('')}${all
     ? `<button type="button" class="ctile ghost" data-act="editSimple" data-kind="${kind === 'in' ? 'catin' : 'catout'}" data-fromform="1">${svgIcon('plus')}<span>New</span></button><button type="button" class="ctile ghost" data-act="allCats">${svgIcon('back')}<span>Less</span></button>`
     : cats.length > shown.length ? `<button type="button" class="ctile ghost" data-act="allCats">${svgIcon('grid')}<span>More</span></button>` : ''}</div>`;
 }
 function whatTiles(f) {
+  if (f.lockWhat) return `<div class="type-hint">${esc(typeLabel(f.forcedType || f.type))}. To change what kind of money this was, delete it and add it again.</div>`;
   const lock = formLocked(), p = person(f.forId), isIn = f.dir === 'in';
   if (!p) return `<div class="field"><div class="chips kinds">${forPeople('').map(x => `<button type="button" class="chip" data-act="setFor" data-id="${x.id}">${esc(x.name)}</button>`).join('')}<button type="button" class="chip ghost" data-act="forOther">Other…</button></div></div>`;
   const b = personBalances()[p.id] || 0, nm = esc(p.name), its = isIn ? openItemsOf(p.id) : [];
@@ -1307,9 +1314,29 @@ function whatTiles(f) {
   return `<div class="wtiles">${opts.map(([k, t, sub]) => `<button type="button" class="wtile ${f.what === k ? 'on' : ''}" data-act="setWhat" data-v="${k}" ${lock ? 'disabled' : ''}><b>${t}</b><span>${sub}</span></button>`).join('')}</div>
     ${isIn && holdsForMe(p.id) && !f.editingId ? `<button type="button" class="link small spentby" data-act="quickType" data-type="spentBy" data-p="${p.id}">They spent some of it for me ›</button>` : ''}`;
 }
+function billView(f) {
+  const isOut = f.direction !== 'in', dv = isOut ? 'out' : 'in';
+  const sw = [['in', 'Coming in'], ['out', 'Bill to pay']].map(([v, l]) => `<button type="button" class="dsw ${v} ${dv === v ? 'on' : ''}" data-act="billDir" data-v="${v}" ${f.editingId ? 'disabled' : ''} aria-label="${l}">${ARROW[v]}${dv === v ? `<span>${l}</span>` : ''}</button>`).join('');
+  const t0 = today(), dl = f.date === t0 ? 'today' : fmtShort(f.date);
+  const chips = [`<label class="ach on">${svgIcon('cal')}<span>Due ${dl}</span><input type="date" data-f="date" value="${esc(f.date)}" aria-label="Due date"></label>`,
+    chipSel(esc((REPEAT_OPT.find(o => o[0] === (f.repeat || '')) || REPEAT_OPT[0])[1]), `<select data-f="repeat" aria-label="Repeats">${REPEAT_OPT.map(([v, l]) => `<option value="${v}" ${(f.repeat || '') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`, 'swap'),
+    `<button type="button" class="ach ${f.accountId ? '' : 'dim'}" data-act="accSheet" data-k="accountId">${svgIcon(acc(f.accountId) ? accIconOf(acc(f.accountId)) : 'wallet')}<span>${acc(f.accountId) ? (isOut ? 'Pay from ' : 'Into ') + esc(acc(f.accountId).name) : isOut ? 'Pay from' : 'Into'}</span></button>`];
+  if (S.books.length) chips.push(chipSel(book(f.bookId) ? esc(bookName(f.bookId)) : 'Area', `<select data-f="bookId" aria-label="Area"><option value="">No area</option>${S.books.map(b => `<option value="${b.id}" ${f.bookId === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select>`, 'grid', f.bookId ? '' : 'dim'));
+  if (!isOut && S.people.length) chips.push(chipSel(person(f.personId) ? 'From ' + esc(person(f.personId).name) : 'From whom', `<select data-f="personId" aria-label="From"><option value="">Nobody in particular</option>${S.people.map(x => `<option value="${x.id}" ${f.personId === x.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`, 'users', f.personId ? '' : 'dim'));
+  if (isOut && !f.editingId) chips.push(`<button type="button" class="ach ${f.remind ? 'claim' : 'dim'}" data-act="billRemind" aria-pressed="${!!f.remind}">${svgIcon('cal')}<span>${f.remind ? 'Remind me 2 days before' : 'No reminder'}</span></button>`);
+  const kind = isOut ? 'out' : 'in', use = {};
+  live().forEach(e => { if (e.categoryId) use[e.categoryId] = (use[e.categoryId] || 0) + 1; });
+  const cats = S.categories.filter(c => c.kind === kind).map((c, i) => ({ c, i })).sort((a, b) => (isOut ? (b.c.bill ? 1 : 0) - (a.c.bill ? 1 : 0) : 0) || (use[b.c.id] || 0) - (use[a.c.id] || 0) || a.i - b.i).map(x => x.c);
+  let shown = ui.allCats ? cats : cats.slice(0, 7);
+  if (!ui.allCats && f.categoryId && !shown.some(c => c.id === f.categoryId)) { const x = cat(f.categoryId); if (x) shown = [...shown.slice(0, 6), x]; }
+  const tiles = `<div class="ctiles">${shown.map(c => `<button type="button" class="ctile ${f.categoryId === c.id ? 'on' : ''}" data-act="pickCat" data-id="${c.id}" style="--cc:${c.color || 'var(--muted)'}">${svgIcon(catIconOf(c))}<span>${esc(c.name)}</span></button>`).join('')}${cats.length > 7 ? `<button type="button" class="ctile ghost" data-act="allCats">${svgIcon(ui.allCats ? 'back' : 'grid')}<span>${ui.allCats ? 'Less' : 'More'}</span></button>` : ''}</div>`;
+  return `<div class="addv bill" data-dir="${dv}"><div class="addtop"><button type="button" class="icon-btn" data-act="cancelForm" aria-label="Close">✕</button><div class="dirsw">${sw}</div><div class="addtop-r"></div></div>
+    ${amountBlock(f)}${noteLine(f)}<div class="achips">${chips.join('')}</div>${tiles}${keypadHtml('bill', f)}</div>`;
+}
 VIEWS.add = () => {
   const mode = addMode();
   if (mode === 'legacy') return addLegacy();
+  if (mode === 'bill') return billView(form);
   const f = form, parts = [`<div class="addv ${mode}" data-dir="${f.dir}">`, addTop(mode, f)];
   if (mode === 'person') {
     const p = person(f.forId), b = p ? personBalances()[p.id] || 0 : 0;
@@ -1336,6 +1363,7 @@ function addMoreSheet() {
     ${isNew && mode === 'simple' && f.dir !== 'move' ? b('pasteSms', 'receipt', 'Paste bank SMS') : ''}
     ${isNew && mode === 'simple' && f.dir !== 'move' && !f.linkExpected ? b('setLater', 'cal', f.dir === 'out' ? 'Not paid yet (due later)' : 'Not received yet (expected later)') : ''}
     ${mode === 'person' && has2(f, 'due') ? `<label class="opt dueopt">${svgIcon('cal')}<span>${f.type === 'received' ? 'Rest promised by' : 'Return by'}</span><input type="date" data-f="dueDate" value="${esc(f.dueDate || '')}"></label>` : ''}
+    ${f.type === 'expense' ? b('regularToggle', 'swap', f.regular ? 'Regular payment ✓ (tap to undo)' : 'Mark as a regular payment (monthly support, groceries…)') : ''}
     ${isNew ? b('saveNext', 'plus', 'Save and add another') : ''}
   </div>`);
 }
@@ -1346,6 +1374,7 @@ function kpPress(k) {
   if (k === '⌫') v = v.slice(0, -1);
   else if (k === 'C') v = '';
   else if (k === '+' || k === '-') { if (!v) return; v = /[+\-]$/.test(v) ? v.slice(0, -1) + k : v + k; }
+  else if (k === '000') { const last = v.split(/[+\-]/).pop(); if (!last || last === '0' || last.includes('.') || last.length + 3 > 9) return; v += '000'; }
   else if (k === '.') { const last = v.split(/[+\-]/).pop(); if (last.includes('.')) return; v += last ? '.' : '0.'; }
   else { const last = v.split(/[+\-]/).pop(); if (last === '0') v = v.slice(0, -1); if (last.replace('.', '').length >= 10) return; v += k; }
   form.amount = v; inp.value = v; updateAmtPreview(); fitAmount();
@@ -1431,7 +1460,9 @@ function formToEntry() {
   if (e.type === 'expense' && !e.categoryId && !f.linkExpected && !f.draftId) { toast('Pick a category'); $('.ctiles')?.scrollIntoView({ block: 'center' }); return null; }
   if (e.oldEntry && !f.editingId) { const fd = firstAccDate(); if (fd && e.date >= fd) { toast(`"Before Hisaab" is only for money paid before ${fmtShort(fd)}. Choose the account.`); return null; } }
   if (e.type === 'recoverable' && f.claim) e.claim = true;
+  if (e.type === 'expense' && f.regular) e.regular = true;
   if (e.type === 'expense' && claimOn(f)) { const b = claimArea(f.bookId); e.type = 'recoverable'; e.personId = b.claimFrom; e.claim = true; delete e.spentOn; }
+  if (e.claim && !e.categoryId) { toast('Pick a category for the claim'); return null; }
   return e;
 }
 
@@ -1512,6 +1543,8 @@ async function saveForm(again = false) {
   if (e.linkExpected) afterExpectedPayment(e.linkExpected);
   if (e.dueDate && e.personId && person(e.personId)) person(e.personId).dueDate = e.dueDate;
   if (e.categoryId && e.bookId) { S.settings.areaByCat = S.settings.areaByCat || {}; S.settings.areaByCat[e.categoryId] = e.bookId; }
+  if (e.type === 'expense' && e.note) { const rk = S.settings.regularKeys = S.settings.regularKeys || {}; if (e.regular) rk[regKey(e)] = true; else if (f.editingId && rk[regKey(e)] && !f.regular) delete rk[regKey(e)]; }
+  const remindBill = !f.editingId && f.remind && e.type === 'expected' && e.direction === 'out' ? e : null;
 
 
   S.settings.last = { ...S.settings.last, paidFrom: (f.paidFrom && f.paidFrom !== 'old') ? f.paidFrom : S.settings.last.paidFrom, accountId: (f.accountId && f.accountId !== '__old') ? f.accountId : S.settings.last.accountId, bookId: f.bookId || S.settings.last.bookId };
@@ -1533,6 +1566,7 @@ async function saveForm(again = false) {
   if (ret) { tab = ret.tab; stack = ret.stack; cur = ret.cur; render(); }
   else if (stack.length) stepBack();
   else setTab('home');
+  if (remindBill) setTimeout(() => openSheet(`${sheetHead('Add the reminder')}<p class="muted">Your phone's calendar will remind you 2 days before ${esc(entryTitle(remindBill))} is due${remindBill.repeat ? ', every time it repeats' : ''}.</p><a class="btn primary block" href="${billCalUrl(remindBill)}" target="_blank" rel="noopener" data-act="closeSheet">Open Google Calendar</a>`), 80);
 }
 
 async function cancelForm() {
@@ -1562,7 +1596,8 @@ function editEntry(id) {
     accountId: e.oldEntry ? '__old' : (e.accountId || ''), toAccountId: e.toAccountId || '', bookId: e.bookId || '', categoryId: e.categoryId || '',
     workId: e.workId || '', personId: e.type === 'recoverable' ? '' : (e.personId || ''), recoverFrom: e.type === 'recoverable' ? (e.personId || '') : e.type === 'expense' ? (e.spentOn || '') : '',
     dueDate: e.dueDate || '', direction: e.direction || 'in', repeat: e.repeat || '', receipt: e.receipt || '',
-    editingId: e.id, draftId: e.draft ? e.id : null, linkExpected: e.linkExpected || null, bookTouched: !!e.bookId, claim: !!e.claim, claimOff: true,
+    editingId: e.id, draftId: e.draft ? e.id : null, linkExpected: e.linkExpected || null, bookTouched: !!e.bookId, claim: !!e.claim, claimOff: true, regular: !!e.regular,
+    ...(['lent', 'borrowed', 'received', 'repaid', 'advance'].includes(e.type) && person(e.personId) ? { forId: e.personId, viaFor: true, lockWhat: true, forcedType: e.type } : {}),
     txId: e.txId || '', units: e.units ? String(e.units) : '', billRef: e.ref || '', litres: e.litres ? String(e.litres) : '', odo: e.odo ? String(e.odo) : ''
   };
   if (!over.paidFrom) over.paidFrom = (S.settings.last.paidFrom || (S.accounts[0] ? 'a:' + S.accounts[0].id : ''));
@@ -1683,11 +1718,11 @@ function openMenu() {
     ? `<b>${esc(d.email || 'Google Drive')}</b><span>${bad ? 'Backup paused · tap to reconnect' : d.lastBackup ? 'Backed up ' + fmtShort(d.lastBackup.slice(0, 10)) + ', ' + new Date(d.lastBackup).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'Backup on'}</span>`
     : `<b>Backup not set up</b><span>${S.settings.lastBackup ? 'Last file backup ' + fmtShort(S.settings.lastBackup.slice(0, 10)) : 'Your data is only on this phone'}</span>`;
   const bt = budgetRows(ym).rows.find(x => x.k === 'total');
-  const ab = accountBalances(), cash = r2(Object.values(ab).reduce((a, b) => a + b, 0));
+  const ab = accountBalances(), cash = r2(ownAccounts().reduce((a, x) => a + (ab[x.id] || 0), 0));
   const here = v => (cur.v === v ? ' on' : '');
   const it = (v, icon, label, meta, act) => `<button class="dr-item${here(v)}" ${act || `data-act="go" data-v="${v}"`}>${svgIcon(icon)}<span class="dr-l">${label}</span>${meta !== '' && meta != null ? `<span class="dr-m">${meta}</span>` : ''}</button>`;
   $('#menuPanel').innerHTML = `<div class="dr-head">
-      <div class="dr-brand"><img src="icon.svg?v=41.2" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
+      <div class="dr-brand"><img src="icon.svg?v=42" alt="" width="36" height="36"><div><b>Hisaab</b><span>Your money and people</span></div></div>
       <button class="dr-acct ${bad || off ? 'warn' : ''}" data-act="go" data-v="backup"><span class="ico av">${svgIcon('cloud')}</span><span class="dr-acct-t">${status}</span>${bad || off ? '<span class="dr-dot"></span>' : ''}</button>
     </div>
     <nav class="dr-nav" aria-label="Menu">
@@ -1704,10 +1739,12 @@ function openMenu() {
       ${it('backup', 'cloud', 'Backup & restore', bad ? '<span class="danger">Paused</span>' : d.connected ? 'On' : '<span class="warn">Off</span>')}
       ${it('security', 'shield', 'App lock', S.settings.pinHash ? 'On' : 'Off')}
       ${S.settings.pinHash ? it('lockNow', 'lock', 'Lock now', '', 'data-act="lockNow"') : ''}
+      ${it('reminder', 'cal', 'Daily reminder', 'In your calendar', 'data-act="dailyReminder"')}
       ${it('prefs', 'gear', 'Preferences', '')}
       ${it('help', 'help', 'How to use', '')}
+      ${it('update', 'swap', 'Check for update', APP_BUILD.replace('hisaab-', ''), 'data-act="checkUpdateNow"')}
     </nav>
-    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v41.2</p>`;
+    <p class="dr-foot">Data stays on this phone${DB.ok ? '' : ' (limited storage)'} · v42</p>`;
   $('#menu').hidden = false; menuOpen = true; pushHist();
   requestAnimationFrame(() => $('#menu').classList.add('open'));
 }
@@ -1935,7 +1972,9 @@ VIEWS.work = (wid) => {
   const facts = [st.recPending ? `<div class="kv"><span>Still to get back</span><b class="in">${money(st.recPending)}</b></div>` : '',
     withPeople ? `<div class="kv"><span>Cash still with your people</span><b class="warn">${money(withPeople)}</b></div>` : '',
     budget ? `<div class="kv"><span>Estimate ${money(budget)}</span><b class="${st.total > budget ? 'out' : ''}">${st.total > budget ? money(r2(st.total - budget)) + ' over' : money(r2(budget - st.total)) + ' left'}</b></div>` : ''].filter(Boolean).join('');
-  const ents = [...st.entries].sort(sortDesc);
+  const rg = ui.workRange || '', rf = { '': '', m: today().slice(0, 7) + '-01', d30: addDays(today(), -29), lm: shiftYm(today().slice(0, 7), -1) + '-01' }[rg], rt = rg === 'lm' ? shiftYm(today().slice(0, 7), -1) + '-31' : '9999';
+  const ents = [...st.entries].filter(e => (!rf || e.date >= rf) && e.date <= rt).sort(sortDesc);
+  const rangeSel = st.entries.length > 3 ? `<div class="pj-range"><select data-act-change="workRange" aria-label="Show">${[['', 'All time'], ['m', 'This month'], ['lm', 'Last month'], ['d30', 'Last 30 days']].map(([v, l]) => `<option value="${v}" ${rg === v ? 'selected' : ''}>${l}</option>`).join('')}</select>${rg ? `<b>${money(r2(ents.reduce((a, e) => a + e.amount, 0)))}</b>` : ''}</div>` : '';
   let lastM = '', hist = '';
   for (const e of ents) { const m = e.date.slice(0, 7); if (m !== lastM) { hist += `<div class="pj-month">${monthLabel(m)}</div>`; lastM = m; } hist += entryItem(e); }
   const openRec = live().some(e => e.type === 'recoverable' && e.workId === wid && recInfo(e).remaining > 0);
@@ -1943,9 +1982,10 @@ VIEWS.work = (wid) => {
     <span class="ico av lg" aria-hidden="true">${esc((w.name.trim()[0] || '?').toUpperCase())}</span>
     <div class="grow"><h2>${esc(w.name)}</h2>
       <div class="muted small">${[w.ref ? 'Ref ' + esc(w.ref) : '', w.closed ? 'Finished' : '', w.vehicle ? 'Vehicle' : ''].filter(Boolean).join(' · ')}</div>
-      <div class="hlinks"><button class="link" data-act="editWork" data-id="${wid}">Edit</button><span>·</span><button class="link" data-act="shareWork" data-p="${wid}">Share</button><span>·</span><button class="link" data-act="printWork" data-p="${wid}">PDF</button></div></div>
+      <div class="hlinks"><button class="link" data-act="editWork" data-id="${wid}">Edit</button><span>·</span><button class="link" data-act="shareWork" data-p="${wid}">Share</button><span>·</span><button class="link" data-act="printWork" data-p="${wid}">PDF</button>${w.closed ? '' : `<span>·</span><button class="link" data-act="pinWork" data-p="${wid}">${S.settings.pinnedWork === wid ? 'Unpin' : 'Pin to Home'}</button>`}</div></div>
   </div>
-  <div class="pbal"><span class="lbl">Spent on this project</span><b>${money(st.total)}</b></div>
+  <div class="pbal"><span class="lbl">Total on this project</span><b>${money(st.total)}</b></div>
+  ${(() => { const tl = workTimeline(wid); return tl ? `<p class="pj-start">Started ${fmtDate(tl.start)} · ${tl.days} day${tl.days > 1 ? 's' : ''}${w.closed ? '' : ' so far'}</p>${tl.pts.length >= 2 ? `<section class="iv-card"><div class="iv-h">Running total</div>${runLine(tl.pts)}</section>` : ''}` : ''; })()}
   ${facts ? `<div class="card pj-facts">${facts}</div>` : ''}
   <div class="pills pfit">
     <button class="pill primary" data-act="addToWork" data-p="${wid}">+ Spent</button>
@@ -1953,7 +1993,8 @@ VIEWS.work = (wid) => {
     ${openRec ? `<button class="pill" data-act="recoverWork" data-p="${wid}">Got paid back</button>` : ''}
   </div>
   ${st.entries.length ? `<button class="list-item card pj-more" data-act="go" data-v="workmore" data-p="${wid}"><div class="li-main"><div class="li-title">${w.vehicle ? 'Breakdown and fuel log' : 'Breakdown'}</div><div class="li-sub">${w.vehicle ? 'km per litre, cost per km, ' : ''}what it went on, month by month</div></div><span class="chev">›</span></button>` : ''}
-  <div class="list">${hist || '<div class="empty">Nothing linked yet. Tap “+ Spent”, or pick this project on the Add screen.</div>'}</div>
+  ${rangeSel}
+  <div class="list">${hist || (rg ? '<div class="empty">Nothing in this period.</div>' : '<div class="empty">Nothing linked yet. Tap “+ Spent”, or pick this project on the Add screen.</div>')}</div>
   <div class="linkrow minor mt"><button class="link" data-act="toggleWorkDone" data-p="${wid}">${w.closed ? 'Reopen project' : 'Mark as finished'}</button></div>`;
 };
 VIEWS.workmore = (wid) => {
@@ -2034,10 +2075,13 @@ VIEWS.entries = () => {
   return `<div class="ef-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="inp" type="search" placeholder="Search note, person, amount…" value="${esc(F.q)}" data-ef="q" aria-label="Search entries"></div>
   ${period}
   <div class="ef-chips">${F.drafts ? '' : `<button class="ef-chip filter ${nMore ? 'has' : ''}" data-act="efSheet"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filter${nMore ? ' · ' + nMore : ''}</button>`}${active.join('')}${F.month && !F.drafts ? `<button class="ef-chip" data-act="efAllTime">All dates</button>` : ''}</div>
-  <div class="ef-sum"><span>${list.length} entr${list.length === 1 ? 'y' : 'ies'}</span>${list.length ? '<button class="link" data-act="exportEntries">Export</button>' : ''}${outT ? `<span>Out <b class="out">${money(outT)}</b></span>` : ''}${inT ? `<span>In <b class="in">${money(inT)}</b></span>` : ''}${active.length ? `<button class="link" data-act="clearEF">Clear all</button>` : ''}${list.length ? `<button class="link" data-act="selMode">${selOn ? 'Done' : 'Select'}</button>` : ''}</div>
+  <div class="ef-sum"><span>${list.length} entr${list.length === 1 ? 'y' : 'ies'}</span>${list.length ? '<button class="link" data-act="exportEntries">Export</button>' : ''}${outT ? `<span>Out <b class="out">${money(outT)}</b></span>` : ''}${inT ? `<span>In <b class="in">${money(inT)}</b></span>` : ''}${active.length ? `<button class="link" data-act="clearEF">Clear all</button>` : ''}${list.length ? `<button class="link" data-act="selMode">${selOn ? 'Done' : 'Select'}</button>` : ''}<button class="link" data-act="entView">${ui.entView === 'cal' ? 'List' : 'Calendar'}</button></div>
   ${vb ? vehicleHtml({ entries: list, total: r2(list.filter(e => e.type === 'expense' || e.type === 'recoverable').reduce((a, e) => a + e.amount, 0)) }) : ''}
   ${selOn ? `<div class="selbar"><button class="link" data-act="selAll">${sel.size === list.length ? 'None' : 'All ' + list.length}</button><b>${sel.size} selected</b><button class="btn primary sm" data-act="bulkSheet" ${sel.size ? '' : 'disabled'}>Change…</button></div>` : ''}
-  <div class="card flush">${list.length ? list.map(e => selOn ? entryItem(e).replace('class="list-item" data-act="openEntry"', `class="list-item selrow ${sel.has(e.id) ? 'on' : ''}" data-act="selToggle" aria-pressed="${sel.has(e.id)}"`) : entryItem(e)).join('') : `<div class="empty">No entries match.${active.length || F.q ? ' <button class="link" data-act="clearEF">Clear filters</button>' : ''}</div>`}</div>`;
+  ${ui.entView === 'cal' ? `<div class="card calcard">${entriesCalendar(F.month || (F.from ? F.from.slice(0, 7) : today().slice(0, 7)))}</div>` : `<div class="card flush">${list.length ? (() => {
+    let lastD = ''; const dayTot = {}; list.forEach(e => { if (e.type === 'expense' && !isOfficeAcc(e.accountId)) dayTot[e.date] = r2((dayTot[e.date] || 0) + e.amount); });
+    return list.map(e => { const hd = e.date !== lastD ? `<div class="dayh"><span>${new Date(e.date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</span>${dayTot[e.date] ? `<b>${money(dayTot[e.date])}</b>` : ''}</div>` : ''; lastD = e.date;
+      return hd + (selOn ? entryItem(e).replace('class="list-item" data-act="openEntry"', `class="list-item selrow ${sel.has(e.id) ? 'on' : ''}" data-act="selToggle" aria-pressed="${sel.has(e.id)}"`) : entryItem(e)); }).join(''); })() : `<div class="empty">No entries match.${active.length || F.q ? ' <button class="link" data-act="clearEF">Clear filters</button>' : ''}</div>`}</div>`}`;
 };
 function efSheetHtml() {
   const F = ui.entryFilter, types = [...TYPE_ORDER, 'recovery', 'adjustment'];
@@ -2396,7 +2440,7 @@ function ivPage(ym) {
   // money that left your accounts to people or claims this month, minus what came back
   const outP = r2(L.filter(e => inM(e) && !e.oldEntry && (e.accountId || e.viaPersonId) && ['recoverable', 'lent', 'advance'].includes(e.type)).reduce((a, e) => a + e.amount, 0));
   const backP = r2(L.filter(e => inM(e) && ['recovery', 'received'].includes(e.type)).reduce((a, e) => a + e.amount, 0));
-  const withP = r2(outP - backP), ab = accountBalances(), inAcc = r2(S.accounts.reduce((a, x) => a + (ab[x.id] || 0), 0));
+  const withP = r2(outP - backP), ab = accountBalances(), inAcc = r2(ownAccounts().reduce((a, x) => a + (ab[x.id] || 0), 0));
   const pb = personBalances(), owedAll = r2(Object.values(pb).filter(v => v > 0).reduce((a, v) => a + v, 0));
   const claimsAll = r2(S.people.reduce((a, p) => a + claimSplit(p.id).claims, 0));
   const pct = (v, b) => b ? Math.round((v - b) / b * 100) : null;
@@ -2405,17 +2449,17 @@ function ivPage(ym) {
     <div class="iv-sum-grid">
       <button data-act="insIncome"><span>Income</span><b class="in">${money(inc)}</b></button>
       <button data-act="insSpent"><span>Spent (your own)</span><b class="out">${money(cur.total)}</b>${hasPrev ? `<small>${dlt(pct(cur.total, prev.total))} vs ${esc(monthLabel(prevYm).split(' ')[0])}</small>` : ''}</button>
-      <button data-act="jump" data-tab="people"><span>Out to people &amp; claims</span><b>${money(withP)}</b><small>to come back</small></button>
+      <button data-act="jump" data-tab="people"><span>Given out this month</span><b>${money(withP)}</b><small>to people &amp; claims, to come back</small></button>
       ${isNow ? `<button data-act="go" data-v="accounts"><span>In your accounts now</span><b>${money(inAcc)}</b></button>` : `<div><span>Left from income</span><b>${money(r2(inc - cur.total - withP))}</b></div>`}
     </div>
-    ${owedAll ? `<p class="iv-owed">Owed to you in total <b>${money(owedAll)}</b>${claimsAll ? ` · official claims ${money(claimsAll)}` : ''}</p>` : ''}
+    ${owedAll ? `<p class="iv-owed">Owed to you (all time) <b>${money(owedAll)}</b>${claimsAll ? ` · official claims ${money(claimsAll)}` : ''}</p>` : ''}
   </section>`;
   const dc = isNow ? dataChecks() : [];
   const fix = dc.length ? `<button class="alert" data-act="go" data-v="datacheck"><span class="grow"><b>Check your data</b> · ${dc.length} thing${dc.length > 1 ? 's' : ''} make${dc.length > 1 ? '' : 's'} these totals wrong</span>›</button>` : '';
   // bills (paid against a bill) vs day-to-day
-  const billPaid = r2(L.filter(e => e.type === 'expense' && inM(e) && e.linkExpected).reduce((a, e) => a + e.amount, 0)), day = r2(cur.total - billPaid);
-  const prevDay = hasPrev ? r2(prev.total - L.filter(e => e.type === 'expense' && e.linkExpected && e.date >= prevYm + '-01' && e.date <= prevYm + '-31').reduce((a, e) => a + e.amount, 0)) : 0;
-  const split = cur.total ? `<section class="iv-card iv-pair2"><div><span>Bills</span><b>${money(billPaid)}</b><small>paid against a bill</small></div><div><span>Day-to-day</span><b>${money(day)}</b><small>${hasPrev ? dlt(pct(day, prevDay)) + ' vs last month' : 'everything else'}</small></div></section>` : '';
+  const billPaid = r2(L.filter(e => inM(e) && isRegular(e) && !isOfficeAcc(e.accountId)).reduce((a, e) => a + e.amount, 0)), day = r2(cur.total - billPaid);
+  const prevDay = hasPrev ? r2(prev.total - L.filter(e => isRegular(e) && !isOfficeAcc(e.accountId) && e.date >= prevYm + '-01' && e.date <= prevYm + '-31').reduce((a, e) => a + e.amount, 0)) : 0;
+  const split = cur.total ? `<section class="iv-card iv-pair2"><div><span>Bills &amp; regular</span><b>${money(billPaid)}</b><small>bills and regular payments</small></div><div><span>Day-to-day</span><b>${money(day)}</b><small>${hasPrev ? dlt(pct(day, prevDay)) + ' vs last month' : 'everything else'}</small></div></section>` : '';
   // ranked rows with a fixed colour per category (colour follows the category, not its rank)
   const row = (act, attr, dot, name, v, base, prevV) => `<button class="iv-row" data-act="${act}" ${attr}>${dot ? `<i class="iv-sw" style="background:${dot}"></i>` : ''}<span class="grow"><span class="iv-rn">${esc(name)}</span></span><span class="iv-rv"><b>${money(v)}</b><span>${base ? Math.round(v / base * 100) + '%' : ''}${hasPrev && prevV !== undefined ? ' ' + dlt(pct(v, prevV || 0) === null ? null : prevV ? pct(v, prevV) : null) : ''}</span></span></button>`;
   const cats = Object.entries(cur.byCat).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
@@ -2439,7 +2483,7 @@ function ivPage(ym) {
   const trend = months.length >= 2 ? `<section class="iv-card"><div class="iv-h">Month by month</div>${ivColumns(months, ym)}</section>` : '';
   return sum + fix + split + catsH + areasH + peopleH + projH + bigH + trend +
     (cur.total ? `<button class="btn block" data-act="shareMonth" data-ym="${ym}">Share ${monthLabel(ym).split(' ')[0]} summary on WhatsApp</button>` : '') +
-    `<p class="iv-foot">"Spent" is your own money. Loans, official claims and money given to spend for you are kept out and shown as "Out to people &amp; claims".</p>`;
+    `<p class="iv-foot">"Spent" is your own money. Loans, official claims, office cash and money given to spend for you are kept out.</p>`;
 }
 
 function ivOverview(ym) {
@@ -2745,8 +2789,10 @@ const HELP = [
   ]],
   ['Everyday spending', [
     ['Add something I paid for myself', `<p><b>+</b> → type the amount → pick a category → <b>Save</b>. Nothing else is needed.</p><p class="ex">Example: Fuel Rs 4,500 from cash. Type 4500, tap <b>Fuel</b>, Paid from <b>Cash</b>, Save.</p>`],
-    ['The Add screen', `<p>The arrows at the top choose the kind: <b class="in">↓ Income</b>, <b class="out">↑ Expense</b>, <b style="color:var(--move)">⇅ Transfer</b> between your own accounts. Type the amount, write a short note, pick the day (Today, Yesterday, 2 days ago or Pick), tap a category tile, then <b>✓</b>. An expense needs a category.</p><p>The chips change the account, area and project. Choosing a project fills in its usual area, and the category tiles move what you use most in that area or project to the front. A due bill shows as a tile with a <b>DUE</b> mark.</p><p>Keypad: <b>⌫</b> deletes, hold it to clear. <b>+</b> and <b>−</b> add up items. <b>Person</b> moves the amount to someone (loan, money for family); <b>Mine</b> brings it back.</p><p><b>⋯</b> top right: receipt photo, snap now and fill later, paste bank SMS, <b>Not paid yet</b>, save and add another. Closing with an amount typed asks before throwing it away.</p>`],
+    ['The Add screen', `<p>The arrows at the top choose the kind: <b class="in">↓ Income</b>, <b class="out">↑ Expense</b>, <b style="color:var(--move)">⇅ Transfer</b> between your own accounts. Type the amount, write a short note, tap the date chip to change the day, tap a category tile, then <b>✓</b>. An expense needs a category.</p><p><b>Notes remember</b>: start typing and earlier notes appear with their amount; tap one to fill the note, category and area. A new note you type also picks the category it was used with before.</p><p>The account chip opens a list of your accounts with icons and balances; <b>+ Add account</b> is at the bottom. The other chips change the area and project. A bill due in the next 3 days shows as a tile with a <b>DUE</b> mark.</p><p>Keypad: <b>⌫</b> deletes, hold it to clear. <b>000</b> adds three zeros (5 → 5,000). <b>+</b> adds up items. <b>Person</b> moves the amount to someone (loan, money for family); <b>Mine</b> brings it back. <b>Clear</b> empties the amount.</p><p><b>⋯</b> top right: receipt photo, snap now and fill later, paste bank SMS, <b>Not paid yet</b>, <b>Regular payment</b>, save and add another. Closing with an amount typed asks before throwing it away.</p>`],
     ['Money I spend for work and claim later', `<p>Open <b>☰ → Areas</b>, edit the area (for example Govt vehicle, Govt residence or Office) and tick <b>Official: I pay now and claim it back later</b>, then choose the person you claim it from.</p><p>From then on every expense in that area is saved as a <b>claim</b> from that person. A green chip shows "Claim from …"; tap it when you paid from your own pocket.</p><p>That person's page shows <b>Official claims</b> (split by area) apart from <b>Personal</b> money such as a loan to them or a payment they asked you to make. When the money comes, tap <b>They paid back</b>.</p><p class="ex">Example: vehicle repair Rs 20,000 paid through your driver. Area Govt vehicle is official, claimed from the officer who reimburses you. The officer's page shows Official claims Rs 20,000 · Govt vehicle.</p>`],
+    ['Submit a claim and mark it received', `<p>Open the person you claim from. <b>Official claims</b> lists what is not claimed yet. Tap <b>Submit claim</b>, tick the items you are sending and pick the date: they are marked <b>claimed</b>. <b>Claim list</b> sends the list on WhatsApp or as a PDF with the total.</p><p>When the money comes, tap <b>Received</b> next to that claim. A part payment leaves the rest open and shows "Rs … left". Every claim needs a category, so the list is clear.</p>`],
+    ['Office cash (money that is not mine)', `<p>If you keep an imprest or office cash, add it as an account and tick <b>Office cash (not my money)</b>. Spending from it is not counted in your own Spent, and its balance is left out of your total in ☰.</p>`],
     ['Fix several entries at once', `<p><b>All entries → Select</b>, tap the entries (or <b>All</b>), then <b>Change…</b> to set the area, project, category or who pays it back for all of them. Tick <b>Official claim</b> to turn them into claims.</p><p>To combine two areas or categories, edit one and use <b>Merge</b>. An area for work that ends (a house repair) can be <b>turned into a project</b> from the same place.</p>`],
     ['Check your data', `<p>When something makes your totals wrong, Home shows <b>Check your data</b>: accounts below zero, "Before Hisaab" used for recent payments, expenses without a category or area, a bill already paid but not linked, phone numbers in the wrong format. Each item opens where you fix it.</p>`],
     ['Several items in one entry', `<p>Type them with +: <b>1200+350+80</b>. The app adds them up and shows the total.</p>`],
@@ -2764,7 +2810,8 @@ const HELP = [
     ['A friend paid for me (I owe him)', `<p>Open the friend in <b>People</b> → <b>I received</b> → <b>Paid for me</b>, then enter the amount and pick what it was. The account chip shows <b>Paid by</b> the friend. It counts as your spending and shows that you owe him.</p><p class="ex">Example: Kashif paid your dinner Rs 1,200 → Spent +1,200, you owe Kashif Rs 1,200.</p>`],
     ['I gave someone money to buy things for me', `<p>Open the person → <b>I gave / paid</b> → <b>To spend for me</b>.</p><p>When they tell you what they bought: <b>+</b> → amount → category → tap the account chip and pick that person (listed under "Money I gave them to spend"). Or on their page → <b>I received</b> → <b>They spent some of it for me</b>.</p><p>When they return the change: their page → <b>I received</b> → <b>Returning unused money</b>.</p><p class="ex">Example: Gave your brother Rs 5,000 for groceries. He spent Rs 4,200 and returned Rs 800. Spent shows Rs 4,200, and your brother's balance returns to zero.</p>`],
     ['Which type to choose for a person', `<p>The type only decides which option is already selected when you add money for them. You can change it on any entry.</p><p><b>Family / relative</b>: money you spend on them is not paid back (fees, gifts, treats).<br><b>Friend</b>: money you give is a loan that comes back.<br><b>Spends money for me</b>: you hand them cash to buy things or pay for work for you; they bring back bills or the change.<br><b>Office / company (pays me back)</b>: you spend on their work and they reimburse you.<br><b>Other</b>: shops, landlord, anyone else.</p><p class="ex">Example: Your brother → Family. Your driver who buys fuel with your cash → Spends money for me. Your department → Office / company.</p>`],
-    ['See everything with one person', `<p>Open <b>People</b> → tap the name. You see what they owe or you owe, what's still to get back, what you spent on them, and the full history by month.</p>`],
+    ['See everything with one person', `<p>Open <b>People</b> → tap the name. The top shows what they owe or you owe, split into official claims and personal money. Below is one history list: each item has a tag such as <b>not back yet</b>, <b>Rs … left</b>, <b>claimed</b> or <b>paid back</b>.</p><p>The two big buttons at the bottom are <b>I gave ↑</b> and <b>I received ↓</b>. Old entries open in the same person screen when you edit them, so a loan stays a loan.</p>`],
+    ['Remind someone on WhatsApp', `<p>Open the person → <b>Remind on WhatsApp</b>. It writes a short polite message with the personal amount they owe (official claims are left out). You can change it before sending.</p>`],
     ['Send a statement on WhatsApp', `<p>Open the person → <b>Share</b> → WhatsApp message or PDF.</p>`],
     ['They promised to pay by a date', `<p>Open the person → <b>Edit</b> → <b>Payment promised by</b>. Home reminds you when the date passes.</p>`]
   ]],
@@ -2776,7 +2823,8 @@ const HELP = [
     ['Group costs of one job or site', `<p><b>☰ → Projects</b> → add one (e.g. "Canal bank repair"). Then pick it on the <b>Project</b> line under Area when adding entries (it shows once you have an open project, and always starts at None). The project page shows the total, your own share vs what will be repaid, what it went on, month by month, and cash still with your people. Add an <b>Estimate / budget</b> (Edit) to see how much of it is used. On the project page: <b>+ Spent</b>, <b>Gave to spend</b> (cash to someone for this project), <b>Got paid back</b>, and entries by month with filters. <b>Mark as finished</b> when done.</p>`]
   ]],
   ['Bills', [
-    ['Add a monthly bill', `<p><b>Bills → + Add</b> → pick the type (Electricity, Gas, Internet…) → amount → due date → <b>How often: Every month</b>.</p>`],
+    ['Add a monthly bill', `<p><b>Bills → + Add</b> opens the same keypad screen as spending. At the top choose <b>Bill to pay</b> or <b>Coming in</b>. Type the amount and the name (e.g. LESCO electricity), then set the due date, <b>Repeats</b> (every month…) and the account. Tap a category tile and ✓.</p><p>Turn on <b>Remind me</b> to add the due date to your phone calendar.</p>`],
+    ['Regular payments (rent, fees, salary to staff)', `<p>For a payment that is not a bill but comes every month, open <b>⋯ → Regular payment</b> while adding it. Insights → <b>Bills &amp; regular</b> then counts it with your bills, so you see your fixed monthly costs.</p>`],
     ['Track a vehicle (fuel, km per litre)', `<p>Make a project for the vehicle (e.g. "Govt vehicle") and tick <b>This is a vehicle</b>. When you add fuel with that project, type the <b>litres</b> and the <b>odometer</b> reading. The project page then shows km per litre, cost per km, km driven and a fuel log. Repairs on the same project count in the cost per km.</p>`],
     ['My bill amount changes every month', `<p>Pay it once with the real amount. From then on the next bill is <b>estimated</b> (≈) from your history: the same month last year if known, else the average of the last 3. When the bill arrives, open it in <b>Bills</b> and tap <b>Enter bill amount</b>, or just type the real amount when you tap Pay.</p><p>Tap any bill to see every month: average, highest, lowest, last bill vs the one before, units and cost per unit, and whether you paid late.</p><p class="ex">Example: LESCO was Rs 21,500 in March and Rs 6,100 in July. Next March the estimate starts from last March.</p>`],
     ['Reference no. and transaction ID', `<p>Add the <b>Reference / consumer no.</b> from the printed bill once (edit the bill). When you pay, tap <b>Copy</b> and paste it in your bank app.</p><p>After paying, add the bank's <b>Transaction ID</b> and, for electricity, gas or water, the <b>units</b>. Search in All entries finds both.</p>`],
@@ -2789,6 +2837,10 @@ const HELP = [
     ['Export to Excel or PDF', `<p><b>☰ → All entries</b> → set the month and filters → <b>Export</b> → Excel file (.csv) or PDF. An account's statement has its own <b>Export</b> under the account name. In Insights, <b>Share summary on WhatsApp</b> sends the month in a few lines.</p>`],
     ['What Insights shows', `<p>Three tabs. Swipe months with ‹ ›.</p><p><b>Overview</b>: how much you spent, a line showing your pace through the month against last month, where the month will end, income and saved, budget, a ring of categories (tap one for its entries), areas with their change from last month, bills, biggest expenses and month by month.<br><b>Projects</b>: each project or site with what it cost, your own share vs what will be repaid, what is still to get back, and cash still with your people.<br><b>People</b>: who owes you, whom you owe, and what you spent on each person.</p><p class="ex">Tip: touch any chart to see the exact amount.</p>`],
     ['Set a budget', `<p><b>☰ → Budgets</b> → <b>Set a monthly budget</b> for all spending, or <b>+ Budget for a category or area</b> (e.g. Fuel Rs 8,000). The line on each bar shows how far through the month you are: if the bar passes it, you are spending too fast.</p>`],
+    ['Calendar view of entries', `<p><b>☰ → All entries → Calendar</b> shows the month as days. A day with entries shows its total; a dashed day has nothing recorded: tap it to add. <b>List</b> goes back to entries grouped by day.</p>`],
+    ['Daily reminder to write entries', `<p><b>☰ → Daily reminder</b> adds a repeating reminder at 8:15 pm to your phone calendar. If yesterday has nothing recorded, Home asks <b>Add</b> or <b>Nothing spent</b>.</p>`],
+    ['Project running total', `<p>A project page shows when it started, how many days so far and a line of the running total. Pick <b>This month</b>, <b>Last month</b> or <b>Last 30 days</b> to see one period. <b>Pin to Home</b> keeps its total on Home.</p>`],
+    ['Get the newest version', `<p>When a new version is out, a bar at the top says so: tap <b>Update</b>. Or open <b>☰ → Check for update</b>. Your entries are not touched.</p>`],
     ['What is the 🔥 streak?', `<p>Days in a row with something recorded. On a day with no spending tap <b>Nothing spent today</b>. Hollow dots are missed days: tap one to fill it in.</p>`]
   ]],
   ['Cash, bank and accounts', [
@@ -2805,7 +2857,7 @@ const HELP = [
   ['Settings', [
     ['Bigger text, dark mode, currency', `<p><b>☰ → Preferences</b>: Appearance (same as phone, light, dark), Text size, Currency symbol, Number style (12,50,000 or 1,250,000).</p>`],
     ['Shortcuts on my home screen', `<p>Long-press the Hisaab icon for <b>Add expense</b>, <b>Bills</b> and <b>People</b>.</p>`],
-    ['Add or rename categories and areas', `<p><b>☰ → Categories</b> or <b>☰ → Areas</b>. You can also tap <b>+ New</b> right in the form.</p>`]
+    ['Add or rename categories and areas', `<p><b>☰ → Categories</b> or <b>☰ → Areas</b>. You can also tap <b>+ New</b> right in the form. A category or account can have its own icon: pick one when you edit it.</p>`]
   ]],
   ['Words used', [
     ['Spent', `<p>Only your own money: things you paid for yourself or others without getting it back, plus items written off. Loans, office claims and transfers are not counted.</p>`],
@@ -2830,12 +2882,24 @@ function filterHelp(q) {
 
 // ---------------- Sheet (modal) ----------------
 let sheetOpen = false;
+let sheetSnap = null;
+const sheetVals = () => [...document.querySelectorAll('#sheet input, #sheet select, #sheet textarea')].map(x => x.type === 'checkbox' ? x.checked : x.value).join('\u0001');
 function openSheet(html) {
   $('#sheet').innerHTML = html;
   $('#sheetWrap').hidden = false;
   sheetOpen = true;
+  // editors (sheets with a Save button) ask before throwing away changes
+  sheetSnap = $('#sheet [data-act^="save"]') ? sheetVals() : null;
+}
+function userCloseSheet() {
+  if (sheetSnap !== null && sheetVals() !== sheetSnap && !$('#sheet .discardbar')) {
+    $('#sheet').insertAdjacentHTML('afterbegin', `<div class="discardbar" role="alert"><span>Discard your changes?</span><button class="btn sm" data-act="keepEditing">Keep editing</button><button class="btn sm danger" data-act="discardSheet">Discard</button></div>`);
+    $('#sheet').scrollTop = 0; return false;
+  }
+  closeSheet(); return true;
 }
 function closeSheet() {
+  sheetSnap = null;
   $('#sheetWrap').hidden = true;
   $('#sheet').innerHTML = '';
   sheetOpen = false;
@@ -3096,7 +3160,7 @@ function openPersonEditor(id, fromField) {
   editorReturnField = fromField || null;
   const kind0 = p?.kind || (fromField === 'forId' && form.dir === 'out' ? 'family' : 'friend');
   openSheet(`${sheetHead(p ? 'Edit person' : 'New person')}
-    <div class="field"><label>Name</label><input id="pName" value="${esc(p?.name || '')}" placeholder="Name, or office/company"></div>
+    <div class="field"><label>Name</label><div class="row-inline"><input id="pName" value="${esc(p?.name || '')}" placeholder="Name, or office/company">${!p && 'contacts' in navigator && 'ContactsManager' in window ? `<button type="button" class="btn" data-act="contactPick" aria-label="Pick from contacts">${svgIcon('users')}</button>` : ''}</div></div>
     <div class="field"><label>Who is this?</label><input type="hidden" id="pKind" value="${kind0}">
       <div class="chips kindchips">${Object.entries(PERSON_KINDS).map(([k, v]) => `<button type="button" class="chip ${kind0 === k ? 'on' : ''}" data-act="pickKind" data-v="${k}">${v}</button>`).join('')}</div>
       <div class="type-hint" id="pKindHint" style="margin-top:8px">${KIND_HINT[kind0]}</div></div>
@@ -3136,6 +3200,8 @@ function openAccountEditor(id) {
   openSheet(`${sheetHead(a ? 'Edit account' : 'New account')}
     <div class="field"><label>Name</label><input id="aName" value="${esc(a?.name || '')}" placeholder="e.g. Meezan Bank"></div>
     <div class="field"><label>Opening balance (when you started using the app)</label><input id="aOpen" inputmode="decimal" value="${a ? a.opening || 0 : ''}" placeholder="0"></div>
+    <div class="field"><label>Icon</label><div class="iconpick" role="radiogroup">${ACC_ICONS.map(ic => `<button type="button" class="ipk ${accIconOf(a || { name: '' }) === ic && (a?.icon || a) ? 'on' : ''}" data-act="pickIcon" data-v="${ic}" aria-label="${ic}">${svgIcon(ic)}</button>`).join('')}</div><input type="hidden" id="sIcon" value="${esc(a?.icon || '')}"></div>
+    <label class="inline-check"><input type="checkbox" class="check" id="aOffice" ${a?.office ? 'checked' : ''}> Office cash (not my money): kept apart, never counted as mine or as my spending</label>
     <div class="btn-row">${a ? `<button class="btn danger" data-act="deleteAccount" data-id="${a.id}">Delete</button>` : ''}<button class="btn primary" data-act="saveAccount" data-id="${a?.id || ''}">Save</button></div>`);
 }
 async function saveAccount(id) {
@@ -3144,8 +3210,11 @@ async function saveAccount(id) {
   const raw = $('#aOpen').value.trim();
   const opening = raw === '' ? 0 : evalAmount(raw);
   if (isNaN(opening)) { toast('Opening balance is not a valid number'); return; }
-  if (id) Object.assign(acc(id), { name, opening });
-  else S.accounts.push({ id: uid(), name, opening });
+  const icon = $('#sIcon')?.value || '', office = !!$('#aOffice')?.checked;
+  let nid = id;
+  if (id) Object.assign(acc(id), { name, opening, office, ...(icon ? { icon } : {}) });
+  else { nid = uid(); S.accounts.push({ id: nid, name, opening, office, ...(icon ? { icon } : {}) }); }
+  if (cur.v === 'add' && ui.accFor && !id) { if (ui.accFor === 'paidFrom') form.paidFrom = 'a:' + nid; else form.accountId = nid; ui.accFor = ''; }
   await save(); closeSheet(); toast('Saved'); render();
 }
 async function deleteAccount(id) {
@@ -3197,6 +3266,7 @@ function openSimpleEditor(kind, id) {
   const col = (x && x.color) || PALETTE[S.categories.length % PALETTE.length];
   openSheet(`${sheetHead((x ? 'Edit ' : 'New ') + what)}
     <div class="field"><label>Name</label><input id="sName" value="${esc(x?.name || '')}"></div>
+    ${isCat ? `<div class="field"><label>Icon</label><div class="iconpick" role="radiogroup">${CAT_ICON_CHOICES.map(ic => `<button type="button" class="ipk ${(x ? catIconOf(x) : '') === ic ? 'on' : ''}" data-act="pickIcon" data-v="${ic}" style="--cc:${col}" aria-label="${ic}">${svgIcon(ic)}</button>`).join('')}</div><input type="hidden" id="sIcon" value="${esc(x?.icon || '')}"></div>` : ''}
     ${kind === 'book' ? (() => { const hint = x && !x.official ? areaClaimHint(x.id) : '', cf = x?.claimFrom || hint;
       return `<label class="inline-check"><input type="checkbox" class="check" id="sOfficial" ${x?.official || hint ? 'checked' : ''} onchange="document.getElementById('sClaimRow').hidden=!this.checked"> Official: I pay now and claim it back later</label>
       <div class="field" id="sClaimRow" ${x?.official || hint ? '' : 'hidden'}><label>Claimed back from</label><select id="sClaimFrom"><option value="">Choose a person</option>${S.people.slice().sort((a, b) => (a.kind === 'org' ? -1 : 0) - (b.kind === 'org' ? -1 : 0) || a.name.localeCompare(b.name)).map(p => `<option value="${p.id}" ${cf === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
@@ -3220,9 +3290,10 @@ async function saveSimple(kind, id) {
     if (id) Object.assign(book(id), opt); else S.books.push({ id: uid(), ...opt });
   }
   else {
+    const icon = $('#sIcon') ? $('#sIcon').value : '';
     const usedC = new Set(S.categories.map(c => c.color)), color = $('#sColor') ? $('#sColor').value : (id && cat(id) ? cat(id).color : (PALETTE.find(c => !usedC.has(c)) || PALETTE[S.categories.length % PALETTE.length]));
-    if (id) Object.assign(cat(id), { name, color });
-    else { const nid = uid(); S.categories.push({ id: nid, name, kind: kind === 'catin' ? 'in' : 'out', color, ...(kind === 'catbill' ? { bill: true } : {}) }); if (cur.v === 'add') form.categoryId = nid; }
+    if (id) { Object.assign(cat(id), { name, color }); if (icon) cat(id).icon = icon; }
+    else { const nid = uid(); S.categories.push({ id: nid, name, kind: kind === 'catin' ? 'in' : 'out', color, ...(icon ? { icon } : {}), ...(kind === 'catbill' ? { bill: true } : {}) }); if (cur.v === 'add') form.categoryId = nid; }
   }
   await save(); closeSheet(); toast('Saved'); render();
 }
@@ -3233,6 +3304,132 @@ async function deleteSimple(kind, id) {
   if (!(await confirmBox('Delete', 'Delete this item?', 'Delete', true))) return;
   if (kind === 'book') S.books = S.books.filter(b => b.id !== id); else S.categories = S.categories.filter(c => c.id !== id);
   await save(); toast('Deleted'); render();
+}
+
+// ---------------- v42 ----------------
+// Account icons and "office cash" (money you hold that is not yours)
+const ACC_ICONS = ['wallet', 'bank', 'card', 'phone', 'brief', 'house'];
+const accIconOf = a => a && a.icon ? a.icon : (/bank|mcb|hbl|ubl|meezan|alfalah|allied|nbp|faysal|askari/i.test(a?.name || '') ? 'bank' : /easypaisa|jazz|sadapay|nayapay|wallet|raast/i.test(a?.name || '') ? 'phone' : /card|visa|master/i.test(a?.name || '') ? 'card' : 'wallet');
+const isOfficeAcc = id => !!acc(id)?.office;
+const ownAccounts = () => S.accounts.filter(a => !a.office);
+// Category icon + colour
+const catIconOf = c => (c && c.icon) || catIcon(c?.name);
+const CAT_ICON_CHOICES = ['basket', 'fork', 'fuel', 'wrench', 'bolt', 'flame', 'drop', 'wifi', 'phone', 'tv', 'car', 'heart', 'bag', 'scale', 'book', 'wallet', 'brief', 'house', 'users', 'receipt', 'shield', 'tag', 'gift', 'cash'];
+// Account picker sheet (icons, balances, holders, + Add account)
+function accSheet(field) {
+  const f = form, ab = accountBalances(), cur = field === 'paidFrom' ? f.paidFrom : f.accountId;
+  const pb = personBalances(), holders = new Set(live().filter(e => e.type === 'advance').map(e => e.personId));
+  const hold = field === 'paidFrom' ? S.people.filter(p => holders.has(p.id) && (pb[p.id] || 0) > 0) : [];
+  const val = a => field === 'paidFrom' ? 'a:' + a.id : a.id;
+  const row = (v, icon, name, sub, on) => `<button class="opt prow ${on ? 'on' : ''}" data-act="accPick" data-k="${field}" data-v="${esc(v)}"><span class="ico sq">${svgIcon(icon)}</span><span class="grow"><b>${name}</b>${sub ? `<br><span class="small muted">${sub}</span>` : ''}</span>${on ? '<span class="tick">✓</span>' : ''}</button>`;
+  const oldOk = field === 'paidFrom' ? f.type === 'recoverable' : ['lent', 'borrowed', 'advance', 'received', 'repaid'].includes(f.type);
+  openSheet(`${sheetHead(field === 'paidFrom' ? 'Paid from' : f.type === 'income' ? 'Received in' : 'Account')}<div class="optlist">
+    ${S.accounts.map(a => row(val(a), accIconOf(a), esc(a.name) + (a.office ? ' <span class="tag">office cash</span>' : ''), money(ab[a.id] || 0), cur === val(a))).join('')}
+    ${hold.map(p => row('p:' + p.id, 'users', esc(p.name), 'holds ' + money(pb[p.id]) + ' of yours', cur === 'p:' + p.id)).join('')}
+    ${oldOk ? row(field === 'paidFrom' ? 'old' : '__old', 'cal', 'Before Hisaab', 'paid before you started; no account', cur === 'old' || cur === '__old') : ''}
+  </div><button class="btn block mt" data-act="accNew" data-k="${field}">+ Add account</button>`);
+}
+// Note suggestions: earlier entries whose note matches what you type
+function noteSuggestions(q) {
+  q = String(q || '').trim().toLowerCase(); if (q.length < 2) return [];
+  const f = form, want = f.dir === 'in' ? ['income'] : ['expense', 'recoverable'], seen = new Set(), out = [];
+  for (const e of [...live()].sort((a, b) => (b.date + (b.createdAt || '')).localeCompare(a.date + (a.createdAt || '')))) {
+    if (!want.includes(e.type) || !e.note) continue;
+    const n = e.note.trim(), k = n.toLowerCase();
+    if (seen.has(k) || k === q || !k.split(/[\s,+&/-]+/).some(w => w.startsWith(q)) && !k.startsWith(q)) continue;
+    seen.add(k); out.push(e); if (out.length >= 3) break;
+  }
+  return out;
+}
+function renderNoteSuggest() {
+  const box = $('#nsug'); if (!box) return;
+  const l = form.editingId ? [] : noteSuggestions(form.note);
+  box.innerHTML = l.map(e => `<button type="button" class="nsg" data-act="noteUse" data-id="${e.id}"><b>${esc(e.note)}</b><span>${money(e.amount)}${e.categoryId ? ' · ' + esc(catName(e.categoryId)) : ''}</span></button>`).join('');
+  box.hidden = !l.length;
+}
+function guessCatFromNote(note) {
+  const w = String(note || '').toLowerCase().split(/[\s,+&/-]+/).filter(x => x.length >= 3); if (!w.length) return '';
+  const want = form.dir === 'in' ? 'in' : 'out', n = {};
+  live().forEach(e => { if (!e.categoryId || !e.note || cat(e.categoryId)?.kind !== want) return; const ew = e.note.toLowerCase(); if (w.some(x => ew.includes(x))) n[e.categoryId] = (n[e.categoryId] || 0) + 1; });
+  const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] >= 1 ? best[0] : '';
+}
+// Regular payments: remembered by category + first word of the note
+const regKey = e => (e.categoryId || '') + '|' + nm4(e.note);
+const isRegular = e => e.type === 'expense' && (!!e.linkExpected || !!e.regular || !!(S.settings.regularKeys || {})[regKey(e)]);
+// Claims: batches submitted together
+function claimItems(pid, open = true) { const am = allocMap(); return live().filter(e => isClaim(e) && e.personId === pid && (!open || recInfo(e, am).remaining > 0)).sort(sortDesc); }
+function claimSheet(pid) {
+  const l = claimItems(pid).filter(e => !e.claimSub); if (!l.length) { toast('No new claims to submit'); return; }
+  const am = allocMap();
+  openSheet(`${sheetHead('Submit claim')}<p class="muted small" style="margin:-4px 0 10px">Tick the items you are claiming. They are marked as submitted; when the money comes, tap Received on the claim.</p>
+    <div class="optlist">${l.map(e => `<label class="opt prow"><input type="checkbox" class="check" name="clm" value="${e.id}" checked><span class="grow"><b>${esc(entryTitle(e))}</b><br><span class="small muted">${fmtShort(e.date)}${e.bookId ? ' · ' + esc(bookName(e.bookId)) : ''}</span></span><b>${money(recInfo(e, am).remaining)}</b></label>`).join('')}</div>
+    <div class="field mt"><label>Submitted on</label><input type="date" id="clmDate" value="${today()}"></div>
+    <div class="btn-row"><button class="btn" data-act="closeSheet">Cancel</button><button class="btn primary" data-act="claimSubmit" data-p="${pid}">Mark submitted</button></div>`);
+}
+function claimBatches(pid) {
+  const am = allocMap(), by = {};
+  claimItems(pid).filter(e => e.claimSub).forEach(e => { const k = e.claimBatch || e.claimSub; (by[k] = by[k] || { date: e.claimSub, ids: [], rem: 0 }).ids.push(e.id); by[k].rem = r2(by[k].rem + recInfo(e, am).remaining); });
+  return Object.entries(by).map(([k, v]) => ({ k, ...v })).sort((a, b) => b.date.localeCompare(a.date));
+}
+function claimListText(pid, ids) {
+  const p = person(pid), am = allocMap(), l = (ids ? ids.map(id => S.entries.find(e => e.id === id)) : claimItems(pid)).filter(Boolean);
+  const tot = r2(l.reduce((a, e) => a + recInfo(e, am).remaining, 0));
+  return `Claim list\n${p.name}\n\n` + l.map((e, i) => `${i + 1}. ${fmtShort(e.date)} · ${entryTitle(e)}${e.bookId ? ' (' + bookName(e.bookId) + ')' : ''} · ${money(recInfo(e, am).remaining)}`).join('\n') + `\n\nTotal: ${money(tot)}${l[0]?.claimSub ? '\nSubmitted: ' + fmtDate(l[0].claimSub) : ''}`;
+}
+function printClaims(pid) {
+  const p = person(pid), am = allocMap(), l = claimItems(pid), tot = r2(l.reduce((a, e) => a + recInfo(e, am).remaining, 0));
+  printHTML(`Claim list: ${p.name}`, `As of ${fmtDate(today())} · ${l.length} item${l.length === 1 ? '' : 's'}`,
+    [{ t: 'Date' }, { t: 'Item' }, { t: 'Area' }, { t: 'Submitted' }, { t: 'Amount', n: 1 }],
+    l.map(e => [fmtDate(e.date), esc(entryTitle(e)), esc(e.bookId ? bookName(e.bookId) : ''), e.claimSub ? fmtShort(e.claimSub) : '', money(recInfo(e, am).remaining)]), `Total to claim: ${money(tot)}`);
+}
+function personalOwed(pid) { const b = personBalances()[pid] || 0; return r2(b - claimSplit(pid).claims); }
+function reminderText(pid) {
+  const p = person(pid), v = personalOwed(pid);
+  return `Assalam o Alaikum ${p.name},\nA gentle reminder: ${money(v)} is pending from our personal account in Hisaab (as of ${fmtDate(today())}).\nThank you.`;
+}
+// Daily reminder in the phone calendar (reliable, no server)
+function dailyReminderUrl(hhmm = '20:15') {
+  const d = today().replace(/-/g, ''), [h, m] = hhmm.split(':'), t1 = `${d}T${h}${m}00`, mm = String((+m + 15) % 60).padStart(2, '0'), hh = String(+h + ((+m + 15) >= 60 ? 1 : 0)).padStart(2, '0');
+  const p = new URLSearchParams({ action: 'TEMPLATE', text: 'Hisaab: add today\'s spending', dates: `${t1}/${d}T${hh}${mm}00`, details: 'Open Hisaab and add what you spent today: ' + location.origin + location.pathname + '?go=add', recur: 'RRULE:FREQ=DAILY' });
+  try { p.set('ctz', Intl.DateTimeFormat().resolvedOptions().timeZone); } catch (e) { /* ignore */ }
+  return 'https://calendar.google.com/calendar/render?' + p.toString();
+}
+function missedYesterday() {
+  const y = addDays(today(), -1), L = live();
+  if (L.filter(e => e.type !== 'expected').length < 5) return false;
+  if ((S.settings.noSpend || []).includes(y) || (S.settings.nudgeOff || '') === y) return false;
+  const first = L.reduce((a, e) => (e.type !== 'expected' && (!a || e.date < a) ? e.date : a), '');
+  return first && first < y && !L.some(e => e.type !== 'expected' && e.date === y);
+}
+// Project timeline
+function workTimeline(wid) {
+  const es = live().filter(e => e.workId === wid && ['expense', 'recoverable', 'advance'].includes(e.type)).sort((a, b) => a.date.localeCompare(b.date));
+  if (!es.length) return null;
+  const start = es[0].date, days = Math.max(1, daysBetween(start, today()) + 1);
+  let run = 0; const pts = es.map(e => ({ d: e.date, v: (run = r2(run + e.amount)) }));
+  return { start, days, total: run, pts };
+}
+function runLine(pts) {
+  if (pts.length < 2) return '';
+  const W = 320, H = 110, T = 22, B = 20, t0 = new Date(pts[0].d).getTime(), t1 = Math.max(t0 + 864e5, new Date(pts[pts.length - 1].d).getTime()), max = pts[pts.length - 1].v || 1;
+  const x = d => 6 + (new Date(d).getTime() - t0) / (t1 - t0) * (W - 12), y = v => H - B - v / max * (H - B - T);
+  let dpath = `M${x(pts[0].d).toFixed(1)} ${y(0).toFixed(1)}`; pts.forEach(p => { dpath += ` H${x(p.d).toFixed(1)} V${y(p.v).toFixed(1)}`; });
+  const lx = Math.min(W - 6, x(pts[pts.length - 1].d));
+  return `<svg class="iv-run" viewBox="0 0 ${W} ${H}" role="img" aria-label="Running total ${esc(money(max))}"><line x1="6" x2="${W - 6}" y1="${H - B}" y2="${H - B}" class="rl-base"/><path d="${dpath}" class="iv-run-l"/><circle cx="${lx.toFixed(1)}" cy="${y(max).toFixed(1)}" r="3.5" class="rl-dot"/><text x="${W - 6}" y="13" text-anchor="end" class="rl-v">${esc(money(max))}</text><text x="6" y="${H - 5}" text-anchor="start" class="rl-t">${esc(fmtShort(pts[0].d))}</text><text x="${W - 6}" y="${H - 5}" text-anchor="end" class="rl-t">${esc(fmtShort(pts[pts.length - 1].d))}</text></svg>`;
+}
+// Entries calendar (month grid with daily own spending)
+function entriesCalendar(ym) {
+  const [Y, M] = ym.split('-').map(Number), first = new Date(Y, M - 1, 1), dim = new Date(Y, M, 0).getDate(), lead = (first.getDay() + 6) % 7, t = today();
+  const tot = {}, cnt = {};
+  live().forEach(e => { if (e.date.slice(0, 7) !== ym || e.type === 'expected') return; cnt[e.date] = (cnt[e.date] || 0) + 1; if (e.type === 'expense') tot[e.date] = r2((tot[e.date] || 0) + e.amount); });
+  const ns = new Set(S.settings.noSpend || []);
+  let cells = '<div class="cal-h">' + 'Mon Tue Wed Thu Fri Sat Sun'.split(' ').map(d => `<span>${d}</span>`).join('') + '</div><div class="cal-g">' + '<span></span>'.repeat(lead);
+  for (let i = 1; i <= dim; i++) {
+    const d = `${ym}-${String(i).padStart(2, '0')}`, fut = d > t, has = cnt[d], v = tot[d] || 0;
+    cells += `<button class="cal-d ${fut ? 'fut' : has ? 'has' : ns.has(d) ? 'ns' : 'miss'} ${d === t ? 'today' : ''}" data-act="calDay" data-d="${d}" ${fut ? 'disabled' : ''}><b>${i}</b><small>${has ? (v ? shortMoney(v) : '·') : ns.has(d) ? '0' : fut ? '' : '+'}</small></button>`;
+  }
+  return cells + '</div><p class="muted small" style="margin:8px 2px 0">Empty days show +. Tap a day to see or add its entries.</p>';
 }
 
 // ---------------- v41: official claims, data checks, bulk edit, merge ----------------
@@ -3262,7 +3459,7 @@ function billMatch(e) {
     }) || null;
 }
 const DC_PRED = {
-  nocat: e => e.type === 'expense' && !e.categoryId && !e.draft,
+  nocat: e => (e.type === 'expense' || isClaim(e)) && !e.categoryId && !e.draft,
   noarea: e => (e.type === 'expense' || isClaim(e)) && !e.bookId && !e.draft,
   old: e => { const fd = firstAccDate(); return !!(e.oldEntry && fd && e.date >= fd); },
   future: e => e.type !== 'expected' && e.date > today()
@@ -3277,7 +3474,7 @@ function dataChecks() {
     if (k === 'noarea' && !S.books.length) continue;
     const l = L.filter(DC_PRED[k]); if (!l.length) continue;
     const sum = money(r2(l.reduce((a, e) => a + e.amount, 0)));
-    const t = { old: `${l.length} marked "Before Hisaab" but dated after you started`, nocat: `${l.length} expense${l.length > 1 ? 's' : ''} without a category`, noarea: `${l.length} without an area`, future: `${l.length} dated in the future` }[k];
+    const t = { old: `${l.length} marked "Before Hisaab" but dated after you started`, nocat: `${l.length} expense${l.length > 1 ? 's or claims' : ' or claim'} without a category`, noarea: `${l.length} without an area`, future: `${l.length} dated in the future` }[k];
     const s = { old: `${sum} never left any account. Open each and choose the account.`, nocat: `${sum} missing from category totals`, noarea: `${sum} missing from area totals`, future: 'Check the date' }[k];
     out.push({ t, s, act: `data-act="dcList" data-k="${k}"` });
   }
@@ -3368,7 +3565,7 @@ function areaClaimHint(bid) {
 // ---------------- App updates ----------------
 // An installed app on Android resumes from memory instead of reloading, so it can keep showing an old version.
 // On start and whenever it comes back to the screen, compare with the version on the server and offer a one-tap update.
-const APP_BUILD = 'hisaab-v41.2';
+const APP_BUILD = 'hisaab-v42';
 let updShown = false, updLast = 0;
 async function checkForUpdate() {
   if (!location.protocol.startsWith('http') || updShown || Date.now() - updLast < 60000) return;
@@ -3815,6 +4012,29 @@ const ACT = {
     go('entries');
   },
   clearEF: () => { ui.entryFilter = null; render(); },
+  accSheet: el => accSheet(el.dataset.k),
+  accPick: el => { const k = el.dataset.k, v = el.dataset.v; if (k === 'paidFrom') form.paidFrom = v; else form.accountId = v; closeSheet(); render(); },
+  accNew: el => { ui.accFor = el.dataset.k; closeSheet(); openAccountEditor(null); },
+  noteUse: el => { const e = S.entries.find(x => x.id === el.dataset.id); if (!e) return; form.note = e.note; if (!evalAmount(form.amount || '')) form.amount = String(e.amount); if (e.categoryId && cat(e.categoryId)) form.categoryId = e.categoryId; if (e.bookId && !form.bookTouched) form.bookId = e.bookId; if (e.workId && !form.workId) form.workId = e.workId; if (e.regular) form.regular = true; render(); },
+  claimSheet: el => claimSheet(el.dataset.p),
+  claimSubmit: async el => { const ids = [...document.querySelectorAll('#sheet input[name=clm]:checked')].map(x => x.value), d = $('#clmDate')?.value || today(); if (!ids.length) { toast('Tick at least one item'); return; } const b = uid(); ids.forEach(id => { const e = S.entries.find(x => x.id === id); if (e) { e.claimSub = d; e.claimBatch = b; } }); await save(); closeSheet(); toast(`${ids.length} item${ids.length > 1 ? 's' : ''} marked as claimed`); render(); },
+  claimReceived: el => { const bt = claimBatches(el.dataset.p).find(x => x.k === el.dataset.k); if (bt) openRecovery(bt.ids); },
+  claimShare: el => { const pid = el.dataset.p; openSheet(`${sheetHead('Claim list')}<p class="muted small" style="margin:-4px 0 10px">A formal list of the items still to be paid back: date, item, area and amount.</p><button class="btn block" data-act="claimWA" data-p="${pid}">WhatsApp message</button><button class="btn block mt" data-act="claimPrint" data-p="${pid}">PDF / print</button>`); },
+  claimWA: el => { closeSheet(); const p = person(el.dataset.p); openWhatsApp(p?.phone || '', claimListText(el.dataset.p)); },
+  claimPrint: el => { closeSheet(); printClaims(el.dataset.p); },
+  remindWA: el => { const p = person(el.dataset.p); openWhatsApp(p?.phone || '', reminderText(el.dataset.p)); },
+  calDay: el => { const d = el.dataset.d; ui.entryFilter = { month: '', from: d, to: d, rangeLabel: fmtDate(d), type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false }; ui.entView = 'list'; if (!live().some(e => e.date === d && e.type !== 'expected')) { openFormWith({ date: d }); return; } render(); },
+  entView: () => { ui.entView = ui.entView === 'cal' ? 'list' : 'cal'; render(); },
+  dailyReminder: () => { closeMenu(); openSheet(`${sheetHead('Daily reminder')}<p class="muted">Your phone's calendar reminds you every evening at 8:15 pm to add the day's spending. Tapping the reminder opens Hisaab. Change the time or turn it off in Calendar like any other event.</p><a class="btn primary block" href="${dailyReminderUrl()}" target="_blank" rel="noopener" data-act="closeSheet">Set it in Google Calendar</a>`); },
+  nudgeAdd: () => openFormWith({ date: addDays(today(), -1) }),
+  nudgeNone: async () => { const d = addDays(today(), -1); S.settings.noSpend = [...new Set([...(S.settings.noSpend || []), d])].sort().slice(-400); await saveRaw(); toast('Marked: nothing spent yesterday'); render(); },
+  checkUpdateNow: async () => { closeMenu(); updLast = 0; updShown = false; toast('Checking…'); await checkForUpdate(); if (!updShown) toast(`You have the latest version (${APP_BUILD.replace('hisaab-', '')})`); },
+  pinWork: async el => { S.settings.pinnedWork = S.settings.pinnedWork === el.dataset.p ? '' : el.dataset.p; await saveRaw(); toast(S.settings.pinnedWork ? 'Pinned to Home' : 'Unpinned'); render(); },
+  contactPick: async () => { try { const r = await navigator.contacts.select(['name', 'tel'], { multiple: false }); const c = r && r[0]; if (!c) return; if (c.name && c.name[0]) $('#pName').value = c.name[0]; if (c.tel && c.tel[0] && $('#pPhone')) $('#pPhone').value = normPhone(c.tel[0]); } catch (e) { toast('Could not open contacts'); } },
+  pickIcon: el => { document.querySelectorAll('#sheet .ipk').forEach(b => b.classList.toggle('on', b === el)); const h = $('#sIcon'); if (h) h.value = el.dataset.v; },
+  regularToggle: () => { form.regular = !form.regular; closeSheet(); toast(form.regular ? 'Will be counted as a regular payment' : 'Not a regular payment'); },
+  billDir: el => { if (form.editingId) return; const v = el.dataset.v; form.dir = v; form.direction = v; form.later = true; form.kind = v === 'out' ? 'me' : 'income'; form.categoryId = ''; deriveType(); render(); },
+  billRemind: () => { form.remind = !form.remind; render(); },
   dcList: el => { ui.entryFilter = { month: '', from: '', to: '', type: '', book: '', person: '', work: '', q: '', drafts: false, spentOnly: false, special: el.dataset.k }; go('entries'); },
   dcLink: async el => { const e = S.entries.find(x => x.id === el.dataset.e), x = S.entries.find(y => y.id === el.dataset.x); if (!e || !x) return; e.linkExpected = x.id; e.history = [...(e.history || []), { at: new Date().toISOString(), changes: { linkExpected: ['', x.id] } }]; afterExpectedPayment(x.id); await save(); toast('Linked to the bill'); render(); },
   dcPhones: async () => { S.people.forEach(p => { if (p.phone) p.phone = normPhone(p.phone); }); await save(); toast('Phone numbers tidied'); render(); },
@@ -3913,7 +4133,9 @@ const ACT = {
   openEntry: el => openEntry(el.dataset.id),
   editEntry: el => editEntry(el.dataset.id),
   deleteEntry: el => deleteEntry(el.dataset.id),
-  closeSheet: () => closeSheet(),
+  closeSheet: () => userCloseSheet(),
+  keepEditing: () => $('#sheet .discardbar')?.remove(),
+  discardSheet: () => closeSheet(),
   confirmOk: () => { const r = confirmBox._res; confirmBox._res = null; closeSheet(); if (r) r(true); },
   openInsights: () => { ui.insTab = 'overview'; go('insights'); insMonth = insYm(); render(); },
   insTab: el => { ui.insTab = el.dataset.t; ui.insAllCats = false; render(); window.scrollTo(0, 0); },
@@ -3974,7 +4196,10 @@ const ACT = {
     form.amount = String(Math.round(Math.abs(bal))); render();
   },
 
-  sharePerson: el => { const pid = el.dataset.p; openSheet(`${sheetHead('Share statement')}<button class="btn block" data-act="shareWA" data-p="${pid}">WhatsApp message</button><button class="btn block mt" data-act="printPerson" data-p="${pid}">PDF / print</button>`); },
+  sharePerson: el => { const pid = el.dataset.p, cl = claimSplit(pid).claims, pv = personalOwed(pid); openSheet(`${sheetHead('Share')}
+    ${pv > 0 ? `<button class="btn block" data-act="remindWA" data-p="${pid}">Reminder on WhatsApp (personal ${money(pv)})</button>` : ''}
+    ${cl ? `<button class="btn block mt" data-act="claimWA" data-p="${pid}">Claim list on WhatsApp</button><button class="btn block mt" data-act="claimPrint" data-p="${pid}">Claim list as PDF</button>` : ''}
+    <div class="sec-title" style="margin-top:14px">Full statement</div><button class="btn block" data-act="shareWA" data-p="${pid}">WhatsApp message</button><button class="btn block mt" data-act="printPerson" data-p="${pid}">PDF / print</button>`); },
   pickContact: async () => {
     try {
       const [c] = await navigator.contacts.select(['name', 'tel'], { multiple: false });
@@ -4179,6 +4404,10 @@ const ACT = {
   }
 };
 
+// Note suggestions act on press, before the note box loses focus and re-renders the screen
+let nsgSwallow = 0;
+document.addEventListener('pointerdown', e => { const s = e.target.closest && e.target.closest('.nsg'); if (!s) return; e.preventDefault(); nsgSwallow = Date.now() + 700; ACT.noteUse(s); }, true);
+document.addEventListener('click', e => { if (nsgSwallow && Date.now() < nsgSwallow) { nsgSwallow = 0; e.preventDefault(); e.stopPropagation(); } else nsgSwallow = 0; }, true);
 document.addEventListener('click', e => {
   if (undoSnap && !e.target.closest('.tundo')) { $('#toast').classList.remove('show'); undoSnap = null; }
   const fromMenu = menuOpen && !!e.target.closest('#menuPanel [data-act]');
@@ -4200,6 +4429,7 @@ document.addEventListener('input', e => {
     const k = t.dataset.f;
     form[k] = t.type === 'checkbox' ? t.checked : t.value;
     if (k === 'amount') updateAmtPreview();
+    if (k === 'note' && cur.v === 'add') renderNoteSuggest();
     if (k === 'paidFromWho') return;
     if (k === 'bookId') form.bookTouched = true;
     if (k === 'personId' && form.type === 'lent') { render(); return; }
@@ -4232,8 +4462,11 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target;
+  if (!t.isConnected) return;
   if (t.dataset.f === 'paidFromWho') { form.paidFrom = t.value ? 'p:' + t.value : 'ask'; render(); return; }
   if (t.dataset.f === 'date' && t.classList.contains('dpick')) { form.date = t.value || today(); render(); return; }
+  if (t.dataset.actChange === 'workRange') { ui.workRange = t.value; render(); return; }
+  if (t.dataset.f === 'note' && cur.v === 'add' && !form.categoryId && !form.editingId && form.type !== 'transfer') { form.note = t.value; const g = guessCatFromNote(t.value); if (g) { form.categoryId = g; if (!form.bookTouched && typeof areaForCat === 'function') { const a = areaForCat(g); if (a) form.bookId = a; } render(); return; } }
   if (t.dataset.f === 'workId' && t.value === '__new') { t.value = form.workId || ''; openWorkEditor(null, true); return; }
   if (t.dataset.f && (t.closest('.achips') || t.closest('.dchips'))) { // v40 chips: store and redraw so the chip shows the new choice
     const k = t.dataset.f; form[k] = k === 'date' ? (t.value || today()) : t.value;
